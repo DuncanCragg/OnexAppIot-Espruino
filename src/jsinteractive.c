@@ -1848,6 +1848,8 @@ void jsiHandleIOEventForConsole(IOEvent *event) {
   jsiSetBusy(BUSY_INTERACTIVE, false);
 }
 
+void uart_char_incoming(uint32_t ch);
+
 void jsiIdle() {
   // This is how many times we have been here and not done anything.
   // It will be zeroed if we do stuff later
@@ -1873,11 +1875,19 @@ void jsiIdle() {
        console device. It slows us down and just causes pain. */
     } else if (DEVICE_IS_SERIAL(eventType)) {
       // ------------------------------------------------------------------------ SERIAL CALLBACK
-      JsVar *usartClass = jsvSkipNameAndUnLock(jsiGetClassNameFromDevice(IOEVENTFLAGS_GETTYPE(event.flags)));
-      if (jsvIsObject(usartClass)) {
-        maxEvents -= jsiHandleIOEventForUSART(usartClass, &event);
+      int i, chars = IOEVENTFLAGS_GETCHARS(event.flags);
+      while (chars) {
+        for (i=0;i<chars;i++) {
+          uart_char_incoming(event.data.chars[i]);
+        }
+        if (jshIsTopEvent(IOEVENTFLAGS_GETTYPE(event.flags))) {
+          jshPopIOEvent(&event);
+          maxEvents--;
+          chars = IOEVENTFLAGS_GETCHARS(event.flags);
+        } else {
+          chars = 0;
+        }
       }
-      jsvUnLock(usartClass);
     } else if (DEVICE_IS_USART_STATUS(eventType)) {
       // ------------------------------------------------------------------------ SERIAL STATUS CALLBACK
       JsVar *usartClass = jsvSkipNameAndUnLock(jsiGetClassNameFromDevice(IOEVENTFLAGS_GETTYPE(IOEVENTFLAGS_SERIAL_STATUS_TO_SERIAL(event.flags))));

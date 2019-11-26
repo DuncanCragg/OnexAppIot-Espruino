@@ -13,25 +13,47 @@
  */
  
 #include "platform_config.h"
-#include "jsinteractive.h"
-#include "jshardware.h"
 
-int main() {
+#include "jshardware.h"
+#include "jswrap_microbit.h"
+#include "jsinteractive.h"
+
+#include <onex-kernel/time.h>
+#include <onex-kernel/serial.h>
+
+static volatile uint32_t speed = 128;
+
+static void serial_received(char* ch)
+{
+  if(*ch=='o') speed/=2;
+  if(*ch=='i') speed*=2;
+  if(!speed)  speed=1;
+}
+
+int main()
+{
+  serial_init(serial_received, 0);
+  time_init();
 
   jshInit();
-
-  bool buttonState = false;
-#ifdef BTN1_PININDEX
-  buttonState = jshPinGetValue(BTN1_PININDEX) == BTN1_ONSTATE;
-#endif
   jsvInit(0);
-  jsiInit(!buttonState /* load from flash by default */); // pressing USER button skips autoload
+  jsiInit(false);
+
+  serial_printf("Type 'o' or 'i'\n");
+
+  JsVar* onled  = jsvNewFromString("            #            ");
+  JsVar* offled = jsvNewFromString("                         ");
 
   while (1) 
   {
     jsiLoop();
+
+    serial_printf("%d\n", speed);
+    jswrap_microbit_show(onled);
+    time_delay_ms(speed);
+    jswrap_microbit_show(offled);
+    time_delay_ms(speed);
   }
-  //jsiKill();
-  //jsvKill();
-  //jshKill();
 }
+
+// --------------------------------------------------------------------

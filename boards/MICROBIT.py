@@ -19,7 +19,8 @@ info = {
  'name' : "BBC micro:bit",
  'link' : [ "https://en.wikipedia.org/wiki/Micro_Bit" ],
  'espruino_page_link' : 'MicroBit',
- 'default_console' : "EV_SERIAL1",
+ 'default_onp' : "EV_SERIAL1",
+ 'default_console' : "EV_BLUETOOTH",
  'default_console_tx' : "H0", # pin 24
  'default_console_rx' : "H1", # pin 25
  'default_console_baudrate' : "9600",
@@ -29,14 +30,14 @@ info = {
    'optimizeflags' : '-Os',
    'libraries' : [
      'BLUETOOTH',
-     'GRAPHICS',
    ],
    'makefile' : [
      'SAVE_ON_FLASH=1',
      'DEFINES+=-DCONFIG_GPIO_AS_PINRESET', # Allow the reset pin to work
      'DEFINES+=-DUSE_TAB_COMPLETE', # Removed -DUSE_DEBUGGER due to firmware size issues
-     'INCLUDE += -I$(ROOT)/libs/microbit',
-     'WRAPPERSOURCES += libs/microbit/jswrap_microbit.c'
+     'INCLUDE += -I$(ROOT)/libs/microbit -I$(ROOT)/OnexKernel/include',
+     'WRAPPERSOURCES += libs/microbit/jswrap_microbit.c',
+     'SOURCES += src/onex-kernel.c'
    ]
  }
 };

@@ -1,0 +1,6 @@
+[submodule "OnexKernel"]
+	path = OnexKernel
+	url = https://github.com/DuncanCragg/OnexKernel
+[submodule "OnexLang"]
+	path = OnexLang
+	url = https://github.com/DuncanCragg/OnexLang
