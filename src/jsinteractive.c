@@ -2193,6 +2193,7 @@ void jsiIdle() {
     jsiSetBusy(BUSY_INTERACTIVE, false);
   }
 
+
   /* if we've been around this loop, there is nothing to do, and
    * we have a spare 10ms then let's do some Garbage Collection
    * if we think we need to */
@@ -2211,7 +2212,7 @@ void jsiIdle() {
 
   // Go to sleep!
   if (loopsIdling>=1 && // once around the idle loop without having done any work already (just in case)
-#ifdef USB
+#if defined(USB) && !defined(EMSCRIPTEN)
       !jshIsUSBSERIALConnected() && // if USB is on, no point sleeping (later, sleep might be more drastic)
 #endif
       !jshHasEvents() && //no events have arrived in the mean time
