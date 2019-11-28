@@ -18,42 +18,87 @@
 #include "jswrap_microbit.h"
 #include "jsinteractive.h"
 
-#include <onex-kernel/time.h>
-#include <onex-kernel/serial.h>
+#include <onex-kernel/gpio.h>
+#include <onex-kernel/log.h>
+#include <onf.h>
+#include <onr.h>
 
-static volatile uint32_t speed = 128;
+object* button;
+object* light;
 
-static void serial_received(char* ch)
-{
-  if(*ch=='o') speed/=2;
-  if(*ch=='i') speed*=2;
-  if(!speed)  speed=1;
-}
+bool evaluate_button_io(object* button, void* pressed);
+bool evaluate_light_io(object* light, void* d);
+
+JsVar* onled  = 0;
+JsVar* offled = 0;
+
+void* x;
+#define WHERESTHEHEAP(s) x = malloc(1); log_write("heap after %s: %x\n", s, x);
 
 int main()
 {
-  serial_init(serial_received, 0);
-  time_init();
-
   jshInit();
   jsvInit(0);
   jsiInit(false);
 
-  serial_printf("Type 'o' or 'i'\n");
+  onled  = jsvNewFromString("            #            ");
+  offled = jsvNewFromString("                         ");
+  jswrap_microbit_show(onled);
 
-  JsVar* onled  = jsvNewFromString("            #            ");
-  JsVar* offled = jsvNewFromString("                         ");
+  onex_init("");
 
-  while (1) 
-  {
+#define BUTTON_1 17 // !!
+  gpio_mode(BUTTON_1, INPUT_PULLUP);
+
+  onex_set_evaluators("evaluate_button", evaluate_button_io, 0);
+  onex_set_evaluators("evaluate_light", evaluate_light_logic, evaluate_light_io, 0);
+
+  char* buttonuid = "uid-1-2-3";
+  button=object_new(buttonuid, "evaluate_button", "button", 4);
+  light =object_new(0,         "evaluate_light",  "light", 4);
+  char* lightuid=object_property(light, "UID");
+
+  object_property_set(button, "name", "£€§");
+
+  object_property_set(light, "light", "off");
+  object_property_set(light, "button", buttonuid);
+
+  onex_run_evaluators(lightuid, 0);
+
+  bool button_pressed=false;
+
+  while(1){
     jsiLoop();
-
-    serial_printf("%d\n", speed);
-    jswrap_microbit_show(onled);
-    time_delay_ms(speed);
-    jswrap_microbit_show(offled);
-    time_delay_ms(speed);
+    onex_loop();
+    if(button_pressed != gpio_get(BUTTON_1)){
+      button_pressed = gpio_get(BUTTON_1);
+      onex_run_evaluators(buttonuid, (void*)button_pressed);
+    }
   }
+}
+
+bool evaluate_button_io(object* button, void* pressed)
+{
+  char* s=(char*)(pressed? "down": "up");
+  object_property_set(button, "state", s);
+  return true;
+}
+
+bool evaluate_light_io(object* light, void* d)
+{
+  char* lightuid=object_property(light, "UID");
+  log_write("Light UID %s\n", lightuid);
+
+  if(object_property_is(light, "light", "on")){
+    // move M:B-specific display stuff into display.h
+    jswrap_microbit_show(onled);
+    WHERESTHEHEAP("evaluate_light_io on");
+  }
+  else {
+    jswrap_microbit_show(offled);
+    WHERESTHEHEAP("evaluate_light_io off");
+  }
+  return true;
 }
 
 // --------------------------------------------------------------------
