@@ -19,11 +19,12 @@ info = {
  'name' : "BBC micro:bit",
  'link' : [ "https://en.wikipedia.org/wiki/Micro_Bit" ],
  'espruino_page_link' : 'MicroBit',
- 'default_console' : "EV_SERIAL1",
+ 'default_onp' : "EV_SERIAL1",
+ 'default_console' : "EV_BLUETOOTH",
  'default_console_tx' : "H0", # pin 24
  'default_console_rx' : "H1", # pin 25
  'default_console_baudrate' : "9600",
- 'variables' : 300,
+ 'variables' : 16,
  'binary_name' : 'espruino_%v_microbit.hex',
  'build' : {
    'optimizeflags' : '-Os',
@@ -32,10 +33,23 @@ info = {
    ],
    'makefile' : [
      'SAVE_ON_FLASH=1',
+     'DEFINES+=-DONEX',
+     'DEFINES+=-DSAVE_ON_FLASH_EXTREME',
      'DEFINES+=-DCONFIG_GPIO_AS_PINRESET', # Allow the reset pin to work
      'DEFINES+=-DUSE_TAB_COMPLETE', # Removed -DUSE_DEBUGGER due to firmware size issues
-     'INCLUDE += -I$(ROOT)/libs/microbit',
-     'WRAPPERSOURCES += libs/microbit/jswrap_microbit.c'
+     'DEFINES+=-DNRF5 -DONP_CHANNEL_SERIAL',
+     'INCLUDE += -I$(ROOT)/libs/microbit -I$(ROOT)/OnexKernel/include -I$(ROOT)/OnexKernel/src/onp -I$(ROOT)/OnexLang/include',
+     'WRAPPERSOURCES += libs/microbit/jswrap_microbit.c',
+     'SOURCES += OnexKernel/src/lib/list.c',
+     'SOURCES += OnexKernel/src/lib/value.c',
+     'SOURCES += OnexKernel/src/platforms/nrf5/properties.c',
+     'SOURCES += OnexKernel/src/platforms/nrf5/random.c',
+     'SOURCES += OnexKernel/src/platforms/nrf5/channel-serial.c',
+     'SOURCES += OnexKernel/src/onp/onp.c',
+     'SOURCES += OnexKernel/src/onf/onf.c',
+     'SOURCES += OnexLang/src/behaviours.c',
+     'SOURCES += OnexLang/src/onexlang.c',
+     'SOURCES += src/onex-kernel.c',
    ]
  }
 };

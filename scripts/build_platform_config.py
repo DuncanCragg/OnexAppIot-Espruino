@@ -312,7 +312,8 @@ codeOut("#define DAC_COUNT                            "+str(board.chip["dac"]))
 codeOut("#define EXTI_COUNT                           "+str(exti_count))
 codeOut("");
 codeOut("#define DEFAULT_CONSOLE_DEVICE              "+board.info["default_console"]);
-codeOut("#define DEFAULT_ONP_DEVICE                  "+board.info["default_onp"]);
+if "default_onp" in board.info:
+  codeOut("#define DEFAULT_ONP_DEVICE                  "+board.info["default_onp"]);
 if "default_console_tx" in board.info:
   codeOut("#define DEFAULT_CONSOLE_TX_PIN "+toPinDef(board.info["default_console_tx"]))
 if "default_console_rx" in board.info:

@@ -1875,6 +1875,13 @@ void jsiIdle() {
        console device. It slows us down and just causes pain. */
     } else if (DEVICE_IS_SERIAL(eventType)) {
       // ------------------------------------------------------------------------ SERIAL CALLBACK
+#if !defined(ONEX)
+      JsVar *usartClass = jsvSkipNameAndUnLock(jsiGetClassNameFromDevice(IOEVENTFLAGS_GETTYPE(event.flags)));
+      if (jsvIsObject(usartClass)) {
+        maxEvents -= jsiHandleIOEventForUSART(usartClass, &event);
+      }
+      jsvUnLock(usartClass);
+#else
       int i, chars = IOEVENTFLAGS_GETCHARS(event.flags);
       while (chars) {
         for (i=0;i<chars;i++) {
@@ -1888,6 +1895,7 @@ void jsiIdle() {
           chars = 0;
         }
       }
+#endif
     } else if (DEVICE_IS_USART_STATUS(eventType)) {
       // ------------------------------------------------------------------------ SERIAL STATUS CALLBACK
       JsVar *usartClass = jsvSkipNameAndUnLock(jsiGetClassNameFromDevice(IOEVENTFLAGS_GETTYPE(IOEVENTFLAGS_SERIAL_STATUS_TO_SERIAL(event.flags))));

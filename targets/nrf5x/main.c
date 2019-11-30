@@ -11,12 +11,36 @@
  * Platform Specific entry point
  * ----------------------------------------------------------------------------
  */
- 
-#include "platform_config.h"
 
-#include "jshardware.h"
-#include "jswrap_microbit.h"
+#include "platform_config.h"
 #include "jsinteractive.h"
+#include "jshardware.h"
+
+#if !defined(ONEX)
+
+int main() {
+
+  jshInit();
+
+  bool buttonState = false;
+#ifdef BTN1_PININDEX
+  buttonState = jshPinGetValue(BTN1_PININDEX) == BTN1_ONSTATE;
+#endif
+  jsvInit(0);
+  jsiInit(!buttonState /* load from flash by default */); // pressing USER button skips autoload
+
+  while (1)
+  {
+    jsiLoop();
+  }
+  //jsiKill();
+  //jsvKill();
+  //jshKill();
+}
+
+#else
+
+#include "jswrap_microbit.h"
 
 #include <onex-kernel/gpio.h>
 #include <onex-kernel/log.h>
@@ -102,3 +126,4 @@ bool evaluate_light_io(object* light, void* d)
 }
 
 // --------------------------------------------------------------------
+#endif
