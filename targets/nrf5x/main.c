@@ -84,9 +84,10 @@ int main()
   onex_set_evaluators("evaluate_light", evaluate_light_logic, evaluate_light_io, 0);
 
   char* buttonuid = "uid-1-2-3";
+  char* lightuid = "uid-3-2-1";
   button=object_new(buttonuid, "evaluate_button", "button", 4);
-  light =object_new(0,         "evaluate_light",  "light", 4);
-  char* lightuid=object_property(light, "UID");
+  light =object_new(lightuid,  "evaluate_light",  "light", 4);
+  //char* lightuid=object_property(light, "UID");
 
   object_property_set(button, "name", "£€§");
 
@@ -117,7 +118,7 @@ bool evaluate_button_io(object* button, void* pressed)
 bool evaluate_light_io(object* light, void* d)
 {
   char* lightuid=object_property(light, "UID");
-  log_write("Light UID %s\n", lightuid);
+  log_write("Light UID ---------------------------> %s\n", lightuid);
 
   if(object_property_is(light, "light", "on")){
 #if defined(BOARD_MICROBIT)

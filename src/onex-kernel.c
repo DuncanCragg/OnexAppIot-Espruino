@@ -45,14 +45,11 @@ void uart_char_incoming(uint32_t ch)
   if(rx_handler) rx_handler(&ch);
 }
 
-char* oddworkaround = "---------------------------------------------------------------------------------------------------------------------\n";
-             // .. of at least 118 chars otherwise the whole thing freezes :-(
 void serial_init(uart_rx_handler_t cb, uint32_t baudrate)
 {
   if(serial_initialised) return;
   rx_handler = cb;
   serial_initialised=true;
-  serial_printf(oddworkaround);
 }
 
 void serial_cb(uart_rx_handler_t cb)
