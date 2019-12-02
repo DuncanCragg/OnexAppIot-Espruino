@@ -156,11 +156,13 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
                                                    m_rx_buffer,
                                                    sizeof(m_rx_buffer));
             UNUSED_VARIABLE(ret);
+#if !defined(ONEX)
             // USB connected - so move console device over to it
             if (jsiGetConsoleDevice()!=EV_LIMBO) {
               if (!jsiIsConsoleDeviceForced())
                 jsiSetConsoleDevice(EV_USBSERIAL, false);
             }
+#endif
             break;
         }
         case APP_USBD_CDC_ACM_USER_EVT_PORT_CLOSE: {
