@@ -153,20 +153,23 @@ if [ "$PROVISION_NRF51" = "1" ]; then
     ARM=1
 fi
 if [ "$PROVISION_NRF_SDK15" = "1" ]; then
-    if [ ! -d "targetlibs/nrf5x_15/components" ]; then
-        echo Installing NRF SDK 15.0 to targetlibs/nrf5x_15/components
-        curl https://developer.nordicsemi.com/nRF5_SDK/nRF5_SDK_v15.x.x/nRF5_SDK_15.0.0_a53641a.zip -o nRF5_SDK_15.0.0_a53641a.zip
-        unzip -o nRF5_SDK_15.0.0_a53641a.zip
-        mv nRF5_SDK_15.0.0_a53641a/* targetlibs/nrf5x_15
-        rm -rf nRF5_SDK_15.0.0_a53641a.zip nRF5_SDK_15.0.0_a53641a
-        dos2unix targetlibs/nrf5x_15/components/nfc/t2t_lib/hal_t2t/hal_nfc_t2t.h
-        dos2unix targetlibs/nrf5x_15/components/nfc/t2t_lib/hal_t2t/hal_nfc_t2t.c
-        dos2unix targetlibs/nrf5x_15/modules/nrfx/mdk/nrf.h
-        echo ======================================================
-        echo "FIXME - SDK15 NFC patches don't apply cleanly"
-        echo ======================================================
-        cat targetlibs/nrf5x_15/patches/* | patch -p1
+    echo Installing NRF SDK 15.0 to targetlibs/nrf5x_15
+    if [ ! -f "/tmp/nRF5_SDK_15.0.0_a53641a.zip" ]; then
+      curl https://developer.nordicsemi.com/nRF5_SDK/nRF5_SDK_v15.x.x/nRF5_SDK_15.0.0_a53641a.zip -o /tmp/nRF5_SDK_15.0.0_a53641a.zip
     fi
+    if [ ! -d "/tmp/nRF5_SDK_15.0.0_a53641a" ]; then
+      unzip -d /tmp -o /tmp/nRF5_SDK_15.0.0_a53641a.zip
+    fi
+    if [ ! -d "targetlibs/nrf5x_15/components" ]; then
+      rsync -ruav --modify-window=1 --stats --progress /tmp/nRF5_SDK_15.0.0_a53641a/ targetlibs/nrf5x_15
+    fi
+    # rm -rf /tmp/nRF5_SDK_15.0.0_a53641a # /tmp/nRF5_SDK_15.0.0_a53641a.zip
+    dos2unix targetlibs/nrf5x_15/components/nfc/t2t_lib/hal_t2t/hal_nfc_t2t.h
+    dos2unix targetlibs/nrf5x_15/components/nfc/t2t_lib/hal_t2t/hal_nfc_t2t.c
+    dos2unix targetlibs/nrf5x_15/modules/nrfx/mdk/nrf.h
+    dos2unix targetlibs/nrf5x_15/components/libraries/bootloader/nrf_bootloader.c
+    cat targetlibs/nrf5x_15/patches/000[89]-* | patch -p1
+    # cat targetlibs/nrf5x_15/patches/* | patch -p1
 fi
 #--------------------------------------------------------------------------------
 if [ "$PROVISION_STM32F1" = "1" ]; then
