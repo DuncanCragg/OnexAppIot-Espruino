@@ -461,6 +461,11 @@ flash: all
 ifeq ($(BOARD),MICROBIT)
 	if [ -d "/media/$(USER)/MICROBIT" ]; then cp $(PROJ_NAME).hex /media/$(USER)/MICROBIT;sync; fi
 	if [ -d "/media/MICROBIT" ]; then cp $(PROJ_NAME).hex /media/MICROBIT;sync; fi
+else ifeq ($(BOARD),MICROBITONEX)
+	if [ -d "/media/$(USER)/MICROBIT" ]; then cp $(PROJ_NAME).hex /media/$(USER)/MICROBIT;sync; fi
+	if [ -d "/media/MICROBIT" ]; then cp $(PROJ_NAME).hex /media/MICROBIT;sync; fi
+else ifeq ($(BOARD),NRF52840DONGLE)
+	nrfutil dfu usb-serial -pkg espruino_2v04.256_nrf52840_dongle.zip -p /dev/ttyACM0
 else
         # nrfjprog --family NRF52 --clockspeed 50000 --recover;  will recover a chip if write-protect was set on it
 	if type nrfjprog 2>/dev/null; then nrfjprog --family $(FAMILY) --clockspeed 50000 --program $(PROJ_NAME).hex --chiperase --reset; \

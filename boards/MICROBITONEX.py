@@ -36,6 +36,7 @@ info = {
      'DEFINES+=-DONEX',
      'DEFINES+=-DSAVE_ON_FLASH_EXTREME',
      'DEFINES+=-DCONFIG_GPIO_AS_PINRESET', # Allow the reset pin to work
+     'DEFINES+=-DBOARD_MICROBIT',          # nRF52840-QIAA
      'DEFINES+=-DUSE_TAB_COMPLETE', # Removed -DUSE_DEBUGGER due to firmware size issues
      'DEFINES+=-DNRF5 -DONP_CHANNEL_SERIAL',
      'INCLUDE += -I$(ROOT)/libs/microbit -I$(ROOT)/OnexKernel/include -I$(ROOT)/OnexKernel/src/onp -I$(ROOT)/OnexLang/include',
