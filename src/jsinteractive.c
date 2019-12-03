@@ -1869,11 +1869,14 @@ void jsiIdle() {
     IOEventFlags eventType = IOEVENTFLAGS_GETTYPE(event.flags);
 
     loopsIdling = 0; // because we're not idling
+#if !defined(ONEX)
     if (eventType == consoleDevice) {
       jsiHandleIOEventForConsole(&event);
       /** don't allow us to read data when the device is our
        console device. It slows us down and just causes pain. */
-    } else if (DEVICE_IS_SERIAL(eventType)) {
+    } else
+#endif
+    if (DEVICE_IS_SERIAL(eventType)) {
       // ------------------------------------------------------------------------ SERIAL CALLBACK
 #if !defined(ONEX)
       JsVar *usartClass = jsvSkipNameAndUnLock(jsiGetClassNameFromDevice(IOEVENTFLAGS_GETTYPE(event.flags)));
