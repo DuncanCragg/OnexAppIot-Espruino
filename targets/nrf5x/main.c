@@ -62,10 +62,8 @@ int main()
 
   onex_init("");
 
-#define BUTTON_1 17 // !!
-#define LED_1 1 // !!
-  gpio_mode(BUTTON_1, INPUT_PULLUP);
-  gpio_mode(LED_1, OUTPUT);
+  gpio_mode(BTN1_PININDEX, JSHPINSTATE_GPIO_IN_PULLDOWN);
+  gpio_mode(LED1_PININDEX, JSHPINSTATE_GPIO_OUT);
 
   onex_set_evaluators("evaluate_button", evaluate_button_io, 0);
   onex_set_evaluators("evaluate_light", evaluate_light_logic, evaluate_light_io, 0);
@@ -88,8 +86,8 @@ int main()
   while(1){
     jsiLoop();
     onex_loop();
-    if(button_pressed != gpio_get(BUTTON_1)){
-      button_pressed = gpio_get(BUTTON_1);
+    if(button_pressed != gpio_get(BTN1_PININDEX)){
+      button_pressed = gpio_get(BTN1_PININDEX);
       onex_run_evaluators(buttonuid, (void*)button_pressed);
     }
   }
@@ -109,11 +107,11 @@ bool evaluate_light_io(object* light, void* d)
 
   if(object_property_is(light, "light", "on")){
     WHERESTHEHEAP("evaluate_light_io on");
-    gpio_set(LED_1, 1);
+    gpio_set(LED1_PININDEX, 1);
   }
   else {
     WHERESTHEHEAP("evaluate_light_io off");
-    gpio_set(LED_1, 0);
+    gpio_set(LED1_PININDEX, 0);
   }
   return true;
 }

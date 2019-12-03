@@ -123,14 +123,13 @@ void gpio_mode(uint32_t pin, uint32_t mode)
     jswrap_microbit_show(onled);
   }
 #else
-  jshPinSetState(LED1_PININDEX, JSHPINSTATE_GPIO_OUT);
+  jshPinSetState(pin, mode);
 #endif
-  jshPinSetState(BTN1_PININDEX, JSHPINSTATE_GPIO_IN_PULLDOWN);
 }
 
-int  gpio_get(uint32_t pin)
+int gpio_get(uint32_t pin)
 {
-  return jshPinGetValue(BTN1_PININDEX)? 1: 0;
+  return jshPinGetValue(pin)? 1: 0;
 }
 
 void gpio_set(uint32_t pin, uint32_t value)
@@ -138,7 +137,7 @@ void gpio_set(uint32_t pin, uint32_t value)
 #if defined(BOARD_MICROBIT)
   jswrap_microbit_show(value? onled: offled);
 #else
-  jshPinSetValue(LED1_PININDEX, value);
+  jshPinSetValue(pin, value);
 #endif
 }
 

@@ -79,6 +79,7 @@ chip = {
 devices = {
   'BTN1' : { 'pin' : 'D5', 'pinstate' : 'IN_PULLDOWN' }, # 'P0_17' -  Pin negated in software
   'BTN2' : { 'pin' : 'D11', 'pinstate' : 'IN_PULLDOWN' }, # 'P0_26' -  Pin negated in software
+  'LED1' : { 'pin' : 'D3' }, # dummy pin for LED1 simulation in 5x5 matrix
 };
 
 # left-right, or top-bottom order
