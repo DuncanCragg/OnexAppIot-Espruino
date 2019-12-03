@@ -40,10 +40,6 @@ int main() {
 
 #else
 
-#if defined(BOARD_MICROBIT)
-#include "jswrap_microbit.h"
-#endif
-
 #include <onex-kernel/gpio.h>
 #include <onex-kernel/log.h>
 #include <onf.h>
@@ -55,11 +51,6 @@ object* light;
 bool evaluate_button_io(object* button, void* pressed);
 bool evaluate_light_io(object* light, void* d);
 
-#if defined(BOARD_MICROBIT)
-JsVar* onled  = 0;
-JsVar* offled = 0;
-#endif
-
 void* x;
 #define WHERESTHEHEAP(s) x = malloc(1); log_write("heap after %s: %x\n", s, x);
 
@@ -69,16 +60,12 @@ int main()
   jsvInit(0);
   jsiInit(false);
 
-#if defined(BOARD_MICROBIT)
-  onled  = jsvNewFromString("            #            ");
-  offled = jsvNewFromString("                         ");
-  jswrap_microbit_show(onled);
-#endif
-
   onex_init("");
 
 #define BUTTON_1 17 // !!
+#define LED_1 1 // !!
   gpio_mode(BUTTON_1, INPUT_PULLUP);
+  gpio_mode(LED_1, OUTPUT);
 
   onex_set_evaluators("evaluate_button", evaluate_button_io, 0);
   onex_set_evaluators("evaluate_light", evaluate_light_logic, evaluate_light_io, 0);
@@ -121,17 +108,12 @@ bool evaluate_light_io(object* light, void* d)
   log_write("Light UID ---------------------------> %s\n", lightuid);
 
   if(object_property_is(light, "light", "on")){
-#if defined(BOARD_MICROBIT)
-    // move M:B-specific display stuff into display.h
-    jswrap_microbit_show(onled);
-#endif
     WHERESTHEHEAP("evaluate_light_io on");
+    gpio_set(LED_1, 1);
   }
   else {
-#if defined(BOARD_MICROBIT)
-    jswrap_microbit_show(offled);
-#endif
     WHERESTHEHEAP("evaluate_light_io off");
+    gpio_set(LED_1, 0);
   }
   return true;
 }

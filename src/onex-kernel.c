@@ -105,9 +105,26 @@ int log_write(const char* fmt, ...)
 }
 
 
+#if defined(BOARD_MICROBIT)
+
+#include "jswrap_microbit.h"
+
+JsVar* onled  = 0;
+JsVar* offled = 0;
+
+#endif
 
 void gpio_mode(uint32_t pin, uint32_t mode)
 {
+#if defined(BOARD_MICROBIT)
+  if(!onled){
+    onled  = jsvNewFromString("            #            ");
+    offled = jsvNewFromString("                         ");
+    jswrap_microbit_show(onled);
+  }
+#else
+  jshPinSetState(LED1_PININDEX, JSHPINSTATE_GPIO_OUT);
+#endif
   jshPinSetState(BTN1_PININDEX, JSHPINSTATE_GPIO_IN_PULLDOWN);
 }
 
@@ -115,18 +132,16 @@ int  gpio_get(uint32_t pin)
 {
   return jshPinGetValue(BTN1_PININDEX)? 1: 0;
 }
-/*
+
 void gpio_set(uint32_t pin, uint32_t value)
 {
-  if (value) NRF_GPIO->OUTSET = (1 << pin);
-  else       NRF_GPIO->OUTCLR = (1 << pin);
+#if defined(BOARD_MICROBIT)
+  jswrap_microbit_show(value? onled: offled);
+#else
+  jshPinSetValue(LED1_PININDEX, value);
+#endif
 }
 
 void gpio_toggle(uint32_t pin)
 {
-  uint32_t m=(1 << pin);
-  uint32_t gpio_state = NRF_GPIO->OUT;
-  NRF_GPIO->OUTSET = (m & ~gpio_state);
-  NRF_GPIO->OUTCLR = (m &  gpio_state);
 }
-*/
