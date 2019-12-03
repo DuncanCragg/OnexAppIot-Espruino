@@ -69,10 +69,9 @@ int main()
   onex_set_evaluators("evaluate_light", evaluate_light_logic, evaluate_light_io, 0);
 
   char* buttonuid = "uid-1-2-3";
-  char* lightuid = "uid-3-2-1";
   button=object_new(buttonuid, "evaluate_button", "button", 4);
-  light =object_new(lightuid,  "evaluate_light",  "light", 4);
-  //char* lightuid=object_property(light, "UID");
+  light =object_new(0,  "evaluate_light",  "light", 4);
+  char* lightuid=object_property(light, "UID");
 
   object_property_set(button, "name", "£€§");
 

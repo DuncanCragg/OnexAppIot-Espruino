@@ -6,6 +6,7 @@
 #include <onex-kernel/serial.h>
 #include <onex-kernel/log.h>
 #include <onex-kernel/gpio.h>
+#include <onex-kernel/random.h>
 
 static bool time_initialised=false;
 
@@ -105,6 +106,10 @@ int log_write(const char* fmt, ...)
 }
 
 
+
+
+static bool gpio_initialised=false;
+
 #if defined(BOARD_MICROBIT)
 
 #include "jswrap_microbit.h"
@@ -117,10 +122,11 @@ JsVar* offled = 0;
 void gpio_mode(uint32_t pin, uint32_t mode)
 {
 #if defined(BOARD_MICROBIT)
-  if(!onled){
+  if(!gpio_initialised){
     onled  = jsvNewFromString("            #            ");
     offled = jsvNewFromString("                         ");
     jswrap_microbit_show(onled);
+    gpio_initialised = true;
   }
 #else
   jshPinSetState(pin, mode);
@@ -143,4 +149,21 @@ void gpio_set(uint32_t pin, uint32_t value)
 
 void gpio_toggle(uint32_t pin)
 {
+}
+
+
+
+static bool random_initialised=false;
+
+uint8_t random_byte()
+{
+  return jshGetRandomNumber() & 0xFF;
+}
+
+uint8_t random_ish_byte(){
+  if(!random_initialised){
+    srand(jshGetRandomNumber());
+    random_initialised=true;
+  }
+  return rand() & 0xFF;
 }

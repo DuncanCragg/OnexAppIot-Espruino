@@ -2067,7 +2067,7 @@ JsVarFloat jshReadVRef() {
 unsigned int jshGetRandomNumber() {
   unsigned int v = 0;
   uint8_t bytes_avail = 0;
-  WAIT_UNTIL((sd_rand_application_bytes_available_get(&bytes_avail),bytes_avail>=sizeof(v)),"Random number");
+  WAIT_UNTIL_NO_INTERRUPED((sd_rand_application_bytes_available_get(&bytes_avail),bytes_avail>=sizeof(v)),"Random number");
   sd_rand_application_vector_get((uint8_t*)&v, sizeof(v));
   return v;
 }

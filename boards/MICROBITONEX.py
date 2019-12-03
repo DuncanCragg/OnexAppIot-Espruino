@@ -44,7 +44,6 @@ info = {
      'SOURCES += OnexKernel/src/lib/list.c',
      'SOURCES += OnexKernel/src/lib/value.c',
      'SOURCES += OnexKernel/src/platforms/nrf5/properties.c',
-     'SOURCES += OnexKernel/src/platforms/nrf5/random.c',
      'SOURCES += OnexKernel/src/platforms/nrf5/channel-serial.c',
      'SOURCES += OnexKernel/src/onp/onp.c',
      'SOURCES += OnexKernel/src/onf/onf.c',
