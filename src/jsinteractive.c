@@ -152,6 +152,9 @@ static NO_INLINE void jsiAppendToInputLine(const char *str) {
 /// If Espruino could choose right now, what would be the best console device to use?
 IOEventFlags jsiGetPreferredConsoleDevice() {
   IOEventFlags dev = DEFAULT_CONSOLE_DEVICE;
+#if defined(ONEX)
+  return dev;
+#endif
 #ifdef USE_TERMINAL
   if (!jshIsDeviceInitialised(dev))
     dev = EV_TERMINAL;
