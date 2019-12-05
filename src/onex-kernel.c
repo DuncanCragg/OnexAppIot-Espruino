@@ -46,11 +46,12 @@ void uart_char_incoming(uint32_t ch)
   if(rx_handler) rx_handler(&ch);
 }
 
-void serial_init(uart_rx_handler_t cb, uint32_t baudrate)
+bool serial_init(uart_rx_handler_t cb, uint32_t baudrate)
 {
-  if(serial_initialised) return;
+  if(serial_initialised) return true;
   rx_handler = cb;
   serial_initialised=true;
+  return true;
 }
 
 void serial_cb(uart_rx_handler_t cb)
