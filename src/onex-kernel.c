@@ -41,7 +41,7 @@ static bool serial_initialised=false;
 
 static uart_rx_handler_t rx_handler;
 
-void uart_char_incoming(uint32_t ch)
+void serial_char_in(uint32_t ch)
 {
   if(rx_handler) rx_handler(&ch);
 }

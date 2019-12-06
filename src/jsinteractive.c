@@ -1851,7 +1851,9 @@ void jsiHandleIOEventForConsole(IOEvent *event) {
   jsiSetBusy(BUSY_INTERACTIVE, false);
 }
 
-void uart_char_incoming(uint32_t ch);
+#if defined(ONEX)
+void serial_char_in(uint32_t ch);
+#endif
 
 void jsiIdle() {
   // This is how many times we have been here and not done anything.
@@ -1877,21 +1879,20 @@ void jsiIdle() {
       jsiHandleIOEventForConsole(&event);
       /** don't allow us to read data when the device is our
        console device. It slows us down and just causes pain. */
-    } else
-#endif
-    if (DEVICE_IS_SERIAL(eventType)) {
+    } else if (DEVICE_IS_SERIAL(eventType)) {
       // ------------------------------------------------------------------------ SERIAL CALLBACK
-#if !defined(ONEX)
       JsVar *usartClass = jsvSkipNameAndUnLock(jsiGetClassNameFromDevice(IOEVENTFLAGS_GETTYPE(event.flags)));
       if (jsvIsObject(usartClass)) {
         maxEvents -= jsiHandleIOEventForUSART(usartClass, &event);
       }
       jsvUnLock(usartClass);
+    }
 #else
+    if (eventType == DEFAULT_ONP_DEVICE) {
       int i, chars = IOEVENTFLAGS_GETCHARS(event.flags);
       while (chars) {
         for (i=0;i<chars;i++) {
-          uart_char_incoming(event.data.chars[i]);
+          serial_char_in(event.data.chars[i]);
         }
         if (jshIsTopEvent(IOEVENTFLAGS_GETTYPE(event.flags))) {
           jshPopIOEvent(&event);
@@ -1901,8 +1902,9 @@ void jsiIdle() {
           chars = 0;
         }
       }
+    }
 #endif
-    } else if (DEVICE_IS_USART_STATUS(eventType)) {
+    else if (DEVICE_IS_USART_STATUS(eventType)) {
       // ------------------------------------------------------------------------ SERIAL STATUS CALLBACK
       JsVar *usartClass = jsvSkipNameAndUnLock(jsiGetClassNameFromDevice(IOEVENTFLAGS_GETTYPE(IOEVENTFLAGS_SERIAL_STATUS_TO_SERIAL(event.flags))));
       if (jsvIsObject(usartClass)) {
