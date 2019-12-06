@@ -275,6 +275,10 @@ void jsble_queue_pending(BLEPending blep, uint16_t data) {
   jshHadEvent();
 }
 
+#if defined(ONEX)
+void serial_char_in(uint32_t ch);
+#endif
+
 /// Executes a pending BLE event - returns the number of events Handled
 int jsble_exec_pending(IOEvent *event) {
   int eventsHandled = 1;
@@ -357,6 +361,7 @@ int jsble_exec_pending(IOEvent *event) {
      break;
    }
    case BLEP_WRITE: {
+#if !defined(ONEX)
      JsVar *evt = jsvNewObject();
      if (evt) {
        JsVar *str = jsvNewStringOfLength(bufferLen, (char*)buffer);
@@ -370,6 +375,13 @@ int jsble_exec_pending(IOEvent *event) {
        jsiQueueObjectCallbacks(execInfo.root, eventName, &evt, 1);
        jsvUnLock(evt);
      }
+#else
+     if(DEFAULT_ONP_DEVICE == EV_BLUETOOTH){
+       for (int i=0;i<bufferLen;i++) {
+         serial_char_in(buffer[i]);
+       }
+     }
+#endif
      break;
    }
 #if CENTRAL_LINK_COUNT>0

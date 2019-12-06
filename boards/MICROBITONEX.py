@@ -24,7 +24,7 @@ info = {
  'default_console_tx' : "H0", # pin 24
  'default_console_rx' : "H1", # pin 25
  'default_console_baudrate' : "9600",
- 'variables' : 16,
+ 'variables' : 20,
  'binary_name' : 'espruino_%v_microbit.hex',
  'build' : {
    'optimizeflags' : '-Os',

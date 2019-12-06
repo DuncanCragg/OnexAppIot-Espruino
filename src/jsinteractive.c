@@ -1888,7 +1888,7 @@ void jsiIdle() {
       jsvUnLock(usartClass);
     }
 #else
-    if (eventType == DEFAULT_ONP_DEVICE) {
+    if (DEVICE_IS_SERIAL(eventType) && eventType != EV_BLUETOOTH && eventType == DEFAULT_ONP_DEVICE) {
       int i, chars = IOEVENTFLAGS_GETCHARS(event.flags);
       while (chars) {
         for (i=0;i<chars;i++) {
