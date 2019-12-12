@@ -1,6 +1,7 @@
 
 #include <platform_config.h>
 #include <jshardware.h>
+#include <jsinteractive.h>
 
 #include <onex-kernel/time.h>
 #include <onex-kernel/serial.h>
@@ -141,6 +142,35 @@ void gpio_mode(uint32_t pin, uint32_t mode)
 #else
   jshPinSetState(pin, mode);
 #endif
+}
+
+void gpio_mode_cb(uint32_t pin, uint32_t mode, gpio_pin_cb cb)
+{
+  gpio_mode(pin, mode);
+
+  if(!(jshIsPinValid(pin) && (jsiIsWatchingPin(pin) || jshCanWatch(pin)))){ log_write("gpio_mode_cb pin %d cannot be watched\n", pin); return; }
+
+  int edge = 0;
+  bool repeat = true;
+  JsVarFloat debounce = IS_PIN_A_BUTTON(pin)? 25: 0;
+
+  JsVar *watchPtr = jsvNewObject();
+  if (!watchPtr) { log_write("gpio_mode_cb pin %d run out of space\n", pin); return; }
+
+  ;              jsvObjectSetChildAndUnLock(watchPtr, "pin",      jsvNewFromPin(pin));
+  if(edge)       jsvObjectSetChildAndUnLock(watchPtr, "edge",     jsvNewFromInteger(edge));
+  if(repeat)     jsvObjectSetChildAndUnLock(watchPtr, "recur",    jsvNewFromBool(repeat));
+  if(debounce>0) jsvObjectSetChildAndUnLock(watchPtr, "debounce", jsvNewFromInteger((JsVarInt)jshGetTimeFromMilliseconds(debounce)));
+  ;              jsvObjectSetChild(         watchPtr, "callback", jsvNewNativeFunction(cb,0));
+
+  IOEventFlags exti = EV_NONE;
+  if(!jsiIsWatchingPin(pin)) exti = jshPinWatch(pin, true);
+  if(!exti){ log_write("gpio_mode_cb pin %d either already watching or cannot watch\n", pin); return; }
+  jshSetEventCallback(exti, 0);
+
+  JsVar* watchArrayPtr = jsvLock(watchArray);
+  JsVarInt itemIndex = jsvArrayAddToEnd(watchArrayPtr, watchPtr, 1);
+  jsvUnLock2(watchArrayPtr, watchPtr);
 }
 
 int gpio_get(uint32_t pin)

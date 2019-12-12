@@ -45,9 +45,12 @@ int main() {
 #include <onf.h>
 #include <onr.h>
 
+char* buttonuid = "uid-1-2-3";
+
 object* button;
 object* light;
 
+void button_changed(int);
 bool evaluate_button_io(object* button, void* pressed);
 bool evaluate_light_io(object* light, void* d);
 
@@ -62,13 +65,12 @@ int main()
 
   onex_init("");
 
-  gpio_mode(BTN1_PININDEX, JSHPINSTATE_GPIO_IN_PULLDOWN);
+  gpio_mode_cb(BTN1_PININDEX, JSHPINSTATE_GPIO_IN_PULLDOWN, button_changed);
   gpio_mode(LED1_PININDEX, JSHPINSTATE_GPIO_OUT);
 
   onex_set_evaluators("evaluate_button", evaluate_button_io, 0);
   onex_set_evaluators("evaluate_light", evaluate_light_logic, evaluate_light_io, 0);
 
-  char* buttonuid = "uid-1-2-3";
   button=object_new(buttonuid, "evaluate_button", "button", 4);
   light =object_new(0,  "evaluate_light",  "light", 4);
   char* lightuid=object_property(light, "UID");
@@ -80,16 +82,16 @@ int main()
 
   onex_run_evaluators(lightuid, 0);
 
-  bool button_pressed=false;
 
   while(1){
     jsiLoop();
     onex_loop();
-    if(button_pressed != gpio_get(BTN1_PININDEX)){
-      button_pressed = gpio_get(BTN1_PININDEX);
-      onex_run_evaluators(buttonuid, (void*)button_pressed);
-    }
   }
+}
+
+void button_changed(int pressed)
+{
+  onex_run_evaluators(buttonuid, (void*)(bool)pressed);
 }
 
 bool evaluate_button_io(object* button, void* pressed)

@@ -30,6 +30,10 @@
 #include "bluetooth.h"
 #include "jswrap_bluetooth.h"
 #endif
+#if defined(ONEX)
+#include <onex-kernel/log.h>
+#include <onex-kernel/gpio.h>
+#endif
 
 #ifdef ARM
 #define CHAR_DELETE_SEND 0x08
@@ -2001,6 +2005,13 @@ void jsiIdle() {
                 if (jshIsPinValid(dataPin))
                   jsvObjectSetChildAndUnLock(data, "data", jsvNewFromBool((event.flags&EV_EXTI_DATA_PIN_HIGH)!=0));
               }
+#if defined(ONEX)
+              if(jsvIsNativeFunction(watchCallback)){
+                gpio_pin_cb cb = (gpio_pin_cb)jsvGetNativeFunctionPtr(watchCallback);
+                cb(pinIsHigh);
+              }
+              else
+#endif
               if (!jsiExecuteEventCallback(0, watchCallback, 1, &data) && watchRecurring) {
                 jsError("Ctrl-C while processing watch - removing it.");
                 jsErrorFlags |= JSERR_CALLBACK;
@@ -2084,6 +2095,15 @@ void jsiIdle() {
       if (exec) {
         bool execResult;
         if (data) {
+#if defined(ONEX)
+          if(jsvIsNativeFunction(timerCallback)){
+            gpio_pin_cb cb = (gpio_pin_cb)jsvGetNativeFunctionPtr(timerCallback);
+            bool pinIsHigh = jsvGetBoolAndUnLock(jsvObjectGetChild(data, "state", 0));
+            cb(pinIsHigh);
+            execResult=true;
+          }
+          else
+#endif
           execResult = jsiExecuteEventCallback(0, timerCallback, 1, &data);
         } else {
           JsVar *argsArray = jsvObjectGetChild(timerPtr, "args", 0);
