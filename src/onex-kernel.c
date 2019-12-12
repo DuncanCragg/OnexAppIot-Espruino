@@ -39,24 +39,24 @@ void time_delay_s( uint32_t s)
 
 static bool serial_initialised=false;
 
-static uart_rx_handler_t rx_handler;
+static serial_rx_cb rx_cb;
 
 void serial_char_in(uint32_t ch)
 {
-  if(rx_handler) rx_handler(&ch);
+  if(rx_cb) rx_cb(&ch);
 }
 
-bool serial_init(uart_rx_handler_t cb, uint32_t baudrate)
+bool serial_init(serial_rx_cb cb, uint32_t baudrate)
 {
   if(serial_initialised) return true;
-  rx_handler = cb;
+  rx_cb = cb;
   serial_initialised=true;
   return true;
 }
 
-void serial_cb(uart_rx_handler_t cb)
+void serial_cb(serial_rx_cb cb)
 {
-  rx_handler = cb;
+  rx_cb = cb;
 }
 
 void serial_putchar(uint32_t ch)
@@ -109,8 +109,6 @@ int log_write(const char* fmt, ...)
 
 
 
-static bool gpio_initialised=false;
-
 #if defined(BOARD_MICROBIT)
 
 #include "jswrap_microbit.h"
@@ -120,7 +118,9 @@ JsVar* offled = 0;
 
 #endif
 
-void gpio_mode(uint32_t pin, uint32_t mode)
+static bool gpio_initialised=false;
+
+void gpio_init()
 {
 #if defined(BOARD_MICROBIT)
   if(!gpio_initialised){
@@ -129,6 +129,15 @@ void gpio_mode(uint32_t pin, uint32_t mode)
     jswrap_microbit_show(onled);
     gpio_initialised = true;
   }
+#endif
+}
+
+void gpio_loop(){}
+
+void gpio_mode(uint32_t pin, uint32_t mode)
+{
+#if defined(BOARD_MICROBIT)
+  gpio_init();
 #else
   jshPinSetState(pin, mode);
 #endif
