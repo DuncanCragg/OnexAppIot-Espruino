@@ -18,8 +18,8 @@ import pinutils;
 info = {
  'name' : "Puck.js",
  'link' :  [ "http://www.espruino.com/PuckJS" ],
- 'default_onp' : "EV_SERIAL1",
- 'default_console' : "EV_BLUETOOTH",
+ 'default_onp' : "EV_BLUETOOTH",
+ 'default_console' : "EV_SERIAL1",
  'default_console_tx' : "D28",
  'default_console_rx' : "D29",
  'default_console_baudrate' : "9600",
