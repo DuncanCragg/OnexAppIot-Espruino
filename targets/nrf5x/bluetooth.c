@@ -1320,23 +1320,26 @@ static void ble_evt_handler(ble_evt_t const * p_ble_evt, void * p_context) {
           }
 #endif
 #if (NRF_SD_BLE_API_VERSION >= 5)
-#ifndef S140
           case BLE_GAP_EVT_PHY_UPDATE_REQUEST: {
             /* The PHYs requested by the peer can be read from the event parameters:
-            p_ble_evt->evt.gap_evt.params.phy_update_request.peer_preferred_phys.
-            * Note that the peer's TX correponds to our RX and vice versa. */
-            /* Allow SoftDevice to choose PHY Update Procedure parameters automatically. */
-            ble_gap_phys_t phys = {BLE_GAP_PHY_AUTO, BLE_GAP_PHY_AUTO};
-            sd_ble_gap_phy_update(p_ble_evt->evt.gap_evt.conn_handle, &phys);
+             * p_ble_evt->evt.gap_evt.params.phy_update_request.peer_preferred_phys.
+             * Note that the peer's TX corresponds to our RX and vice versa.
+             * Allow SoftDevice to choose PHY Update Procedure parameters automatically. */
+            ble_gap_phys_t const phys =
+            {
+                .tx_phys = BLE_GAP_PHY_AUTO,
+                .rx_phys = BLE_GAP_PHY_AUTO,
+            };
+            ret_code_t err = sd_ble_gap_phy_update(p_ble_evt->evt.gap_evt.conn_handle, &phys);
+            APP_ERROR_CHECK(err);
             break;
-          }
-#endif
+          } 
           case BLE_GAP_EVT_PHY_UPDATE: {
             if (p_ble_evt->evt.gap_evt.params.phy_update.status == BLE_HCI_STATUS_CODE_SUCCESS) {
               /* PHY Update Procedure completed, see
-              p_ble_evt->evt.gap_evt.params.phy_update.tx_phy and
-              p_ble_evt->evt.gap_evt.params.phy_update.rx_phy for the currently active PHYs of
-              the link. */
+               * p_ble_evt->evt.gap_evt.params.phy_update.tx_phy and
+               * p_ble_evt->evt.gap_evt.params.phy_update.rx_phy
+               * for the currently active PHYs of the link. */
             }
             break;
           }
