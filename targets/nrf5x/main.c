@@ -47,6 +47,7 @@ int main() {
 
 char* buttonuid = "uid-1-2-3";
 
+object* device;
 object* button;
 object* light;
 
@@ -80,8 +81,11 @@ int main()
   object_property_set(light, "light", "off");
   object_property_set(light, "button", buttonuid);
 
-  onex_run_evaluators(lightuid, 0);
+  device=onex_get_device();
+  object_property_set(device, (char*)"io", buttonuid);
+  object_property_add(device, (char*)"io", lightuid);
 
+  onex_run_evaluators(lightuid, 0);
 
   while(1){
     jsiLoop();
@@ -103,9 +107,6 @@ bool evaluate_button_io(object* button, void* pressed)
 
 bool evaluate_light_io(object* light, void* d)
 {
-  char* lightuid=object_property(light, "UID");
-  log_write("Light UID ---------------------------> %s\n", lightuid);
-
   if(object_property_is(light, "light", "on")){
     WHERESTHEHEAP("evaluate_light_io on");
     gpio_set(LED1_PININDEX, 1);
