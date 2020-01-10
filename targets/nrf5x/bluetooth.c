@@ -54,6 +54,7 @@
 #include "ble_hids.h"
 #endif
 
+#include "onex-kernel/log.h"
 
 #if PEER_MANAGER_ENABLED
 #include "peer_manager.h"
@@ -361,25 +362,36 @@ int jsble_exec_pending(IOEvent *event) {
      break;
    }
    case BLEP_WRITE: {
-#if !defined(ONEX)
-     JsVar *evt = jsvNewObject();
-     if (evt) {
-       JsVar *str = jsvNewStringOfLength(bufferLen, (char*)buffer);
-       if (str) {
-         JsVar *ab = jsvNewArrayBufferFromString(str, bufferLen);
-         jsvUnLock(str);
-         jsvObjectSetChildAndUnLock(evt, "data", ab);
-       }
-       char eventName[12];
-       bleGetWriteEventName(eventName, data);
-       jsiQueueObjectCallbacks(execInfo.root, eventName, &evt, 1);
-       jsvUnLock(evt);
+#if defined(ONEX)
+     char eventName[12];
+     bleGetWriteEventName(eventName, data);
+     if(!strcmp(eventName, "#onblew10")){
+       serial_on_recv(0);
      }
-#else
-     if(DEFAULT_ONP_DEVICE == EV_BLUETOOTH){
-       for (int i=0;i<bufferLen;i++) {
-         serial_on_recv(buffer[i]);
+     if(!strcmp(eventName, "#onblewd")){
+       if(DEFAULT_ONP_DEVICE == EV_BLUETOOTH){
+         for (int i=0; i<bufferLen; i++) {
+           serial_on_recv(buffer[i]);
+         }
        }
+     } else {
+#endif
+       JsVar *evt = jsvNewObject();
+       if (evt) {
+         JsVar *str = jsvNewStringOfLength(bufferLen, (char*)buffer);
+         if (str) {
+           JsVar *ab = jsvNewArrayBufferFromString(str, bufferLen);
+           jsvUnLock(str);
+           jsvObjectSetChildAndUnLock(evt, "data", ab);
+         }
+#if !defined(ONEX)
+         char eventName[12];
+         bleGetWriteEventName(eventName, data);
+#endif
+         jsiQueueObjectCallbacks(execInfo.root, eventName, &evt, 1);
+         jsvUnLock(evt);
+       }
+#if defined(ONEX)
      }
 #endif
      break;
