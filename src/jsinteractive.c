@@ -1856,7 +1856,7 @@ void jsiHandleIOEventForConsole(IOEvent *event) {
 }
 
 #if defined(ONEX)
-void serial_on_recv(uint32_t ch);
+void serial_on_recv(char*,int);
 #endif
 
 void jsiIdle() {
@@ -1895,9 +1895,7 @@ void jsiIdle() {
     if (DEVICE_IS_SERIAL(eventType) && eventType != EV_BLUETOOTH && eventType == DEFAULT_ONP_DEVICE) {
       int i, chars = IOEVENTFLAGS_GETCHARS(event.flags);
       while (chars) {
-        for (i=0;i<chars;i++) {
-          serial_on_recv(event.data.chars[i]);
-        }
+        serial_on_recv(event.data.chars, chars);
         if (jshIsTopEvent(IOEVENTFLAGS_GETTYPE(event.flags))) {
           jshPopIOEvent(&event);
           maxEvents--;

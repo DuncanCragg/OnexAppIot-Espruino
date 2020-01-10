@@ -42,9 +42,9 @@ static bool serial_initialised=false;
 
 static serial_recv_cb recv_cb;
 
-void serial_on_recv(uint32_t ch)
+void serial_on_recv(char* ch, int len)
 {
-  if(recv_cb) ch? recv_cb(&ch): recv_cb(0);
+  if(recv_cb) recv_cb(ch, len);
 }
 
 bool serial_init(serial_recv_cb cb, uint32_t baudrate)

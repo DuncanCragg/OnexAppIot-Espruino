@@ -277,7 +277,7 @@ void jsble_queue_pending(BLEPending blep, uint16_t data) {
 }
 
 #if defined(ONEX)
-void serial_on_recv(uint32_t ch);
+void serial_on_recv(char*,int);
 #endif
 
 /// Executes a pending BLE event - returns the number of events Handled
@@ -366,13 +366,11 @@ int jsble_exec_pending(IOEvent *event) {
      char eventName[12];
      bleGetWriteEventName(eventName, data);
      if(!strcmp(eventName, "#onblew10")){
-       serial_on_recv(0);
+       serial_on_recv(0,0);
      }
      if(!strcmp(eventName, "#onblewd")){
        if(DEFAULT_ONP_DEVICE == EV_BLUETOOTH){
-         for (int i=0; i<bufferLen; i++) {
-           serial_on_recv(buffer[i]);
-         }
+         serial_on_recv((char*)buffer, bufferLen);
        }
      } else {
 #endif
