@@ -136,6 +136,10 @@ static bool m_usb_connected = false;
 static bool m_usb_open = false;
 static bool m_usb_transmitting = false;
 
+#if defined(ONEX)
+extern void serial_on_recv(char*,int);
+#endif
+
 /**
  * @brief User event handler @ref app_usbd_cdc_acm_user_ev_handler_t (headphones)
  * */
@@ -156,7 +160,11 @@ static void cdc_acm_user_ev_handler(app_usbd_class_inst_t const * p_inst,
                                                    m_rx_buffer,
                                                    sizeof(m_rx_buffer));
             UNUSED_VARIABLE(ret);
-#if !defined(ONEX)
+#if defined(ONEX)
+            if (DEVICE_IS_SERIAL(DEFAULT_ONP_DEVICE) && DEFAULT_ONP_DEVICE != EV_BLUETOOTH) {
+              serial_on_recv(0,0);
+            }
+#else
             // USB connected - so move console device over to it
             if (jsiGetConsoleDevice()!=EV_LIMBO) {
               if (!jsiIsConsoleDeviceForced())
