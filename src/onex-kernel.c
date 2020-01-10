@@ -40,24 +40,24 @@ void time_delay_s( uint32_t s)
 
 static bool serial_initialised=false;
 
-static serial_rx_cb rx_cb;
+static serial_recv_cb recv_cb;
 
-void serial_char_in(uint32_t ch)
+void serial_on_recv(uint32_t ch)
 {
-  if(rx_cb) rx_cb(&ch);
+  if(recv_cb) recv_cb(&ch);
 }
 
-bool serial_init(serial_rx_cb cb, uint32_t baudrate)
+bool serial_init(serial_recv_cb cb, uint32_t baudrate)
 {
   if(serial_initialised) return true;
-  rx_cb = cb;
+  recv_cb = cb;
   serial_initialised=true;
   return true;
 }
 
-void serial_cb(serial_rx_cb cb)
+void serial_cb(serial_recv_cb cb)
 {
-  rx_cb = cb;
+  recv_cb = cb;
 }
 
 void serial_putchar(uint32_t ch)

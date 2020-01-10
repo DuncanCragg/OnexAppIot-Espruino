@@ -1856,7 +1856,7 @@ void jsiHandleIOEventForConsole(IOEvent *event) {
 }
 
 #if defined(ONEX)
-void serial_char_in(uint32_t ch);
+void serial_on_recv(uint32_t ch);
 #endif
 
 void jsiIdle() {
@@ -1896,7 +1896,7 @@ void jsiIdle() {
       int i, chars = IOEVENTFLAGS_GETCHARS(event.flags);
       while (chars) {
         for (i=0;i<chars;i++) {
-          serial_char_in(event.data.chars[i]);
+          serial_on_recv(event.data.chars[i]);
         }
         if (jshIsTopEvent(IOEVENTFLAGS_GETTYPE(event.flags))) {
           jshPopIOEvent(&event);
