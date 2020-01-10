@@ -1856,7 +1856,7 @@ void jsiHandleIOEventForConsole(IOEvent *event) {
 }
 
 #if defined(ONEX)
-void serial_on_recv(char*,int);
+extern void serial_on_recv(char*,int);
 #endif
 
 void jsiIdle() {
