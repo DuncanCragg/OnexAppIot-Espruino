@@ -47,7 +47,6 @@ int main() {
 
 char* buttonuid = "uid-1-2-3";
 
-object* device;
 object* button;
 object* light;
 
@@ -81,9 +80,8 @@ int main()
   object_property_set(light, "light", "off");
   object_property_set(light, "button", buttonuid);
 
-  device=onex_get_device();
-  object_property_set(device, (char*)"io", buttonuid);
-  object_property_add(device, (char*)"io", lightuid);
+  object_property_set(onex_device_object, (char*)"io", buttonuid);
+  object_property_add(onex_device_object, (char*)"io", lightuid);
 
   onex_run_evaluators(lightuid, 0);
 
