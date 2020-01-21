@@ -45,10 +45,10 @@ int main() {
 #include <onf.h>
 #include <onr.h>
 
-char* buttonuid = "uid-1-2-3";
-
 object* button;
 object* light;
+char* buttonuid;
+char* lightuid;
 
 void button_changed(int);
 bool evaluate_button_io(object* button, void* pressed);
@@ -70,17 +70,20 @@ int main()
 
   onex_set_evaluators("evaluate_button", evaluate_button_io, 0);
   onex_set_evaluators("evaluate_light", evaluate_light_logic, evaluate_light_io, 0);
+  onex_set_evaluators("evaluate_device", evaluate_device_logic, 0);
 
-  button=object_new(buttonuid, "evaluate_button", "button", 4);
-  light =object_new(0,  "evaluate_light",  "light", 4);
-  char* lightuid=object_property(light, "UID");
+  button=object_new(0, "evaluate_button", "button", 4);
+  light =object_new(0, "evaluate_light",  "light", 4);
+  buttonuid=object_property(button, "UID");
+  lightuid=object_property(light, "UID");
 
   object_property_set(button, "name", "£€§");
 
   object_property_set(light, "light", "off");
   object_property_set(light, "button", buttonuid);
 
-  object_property_set(onex_device_object, (char*)"io", buttonuid);
+  object_set_evaluator(onex_device_object, (char*)"evaluate_device");
+  object_property_add(onex_device_object, (char*)"io", buttonuid);
   object_property_add(onex_device_object, (char*)"io", lightuid);
 
   onex_run_evaluators(lightuid, 0);
