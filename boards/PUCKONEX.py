@@ -30,14 +30,14 @@ info = {
    'optimizeflags' : '-Os',
    'libraries' : [
      'BLUETOOTH',
-     'NET',
-     'GRAPHICS',
      'CRYPTO','SHA256','SHA512',
      'AES',
-     'NFC',
-     'NEOPIXEL',
-     #'FILESYSTEM'
-     #'TLS'
+  #  'NET',
+  #  'GRAPHICS',
+  #  'NFC',
+  #  'NEOPIXEL',
+  #  'FILESYSTEM'
+  #  'TLS'
    ],
    'makefile' : [
      'DEFINES+=-DONEX',

@@ -54,7 +54,9 @@
 #include "ble_hids.h"
 #endif
 
+#if defined(ONEX)
 #include "onex-kernel/log.h"
+#endif
 
 #if PEER_MANAGER_ENABLED
 #include "peer_manager.h"
@@ -278,6 +280,7 @@ void jsble_queue_pending(BLEPending blep, uint16_t data) {
 
 #if defined(ONEX)
 extern void serial_on_recv(char*,int);
+char* dataBLEW = 0;
 #endif
 
 /// Executes a pending BLE event - returns the number of events Handled
@@ -365,15 +368,18 @@ int jsble_exec_pending(IOEvent *event) {
 #if defined(ONEX)
      char eventName[12];
      bleGetWriteEventName(eventName, data);
-     if(!strcmp(eventName, "#onblew10")){
-       if(DEFAULT_ONP_DEVICE == EV_BLUETOOTH){
-         serial_on_recv(0,0);
+     if(!dataBLEW && DEFAULT_ONP_DEVICE == EV_BLUETOOTH){
+       if(!strcmp(eventName, "#onblewe" )){ // apparently what the Puck/Pixl does
+         dataBLEW="#onblew10";
        }
+       else
+       if(!strcmp(eventName, "#onblew10")){ // apparently what the Dongle does
+         dataBLEW="#onblewd";
+       }
+       if(dataBLEW) serial_on_recv(0,0);
      }
-     if(!strcmp(eventName, "#onblewd")){
-       if(DEFAULT_ONP_DEVICE == EV_BLUETOOTH){
-         serial_on_recv((char*)buffer, bufferLen);
-       }
+     if(dataBLEW && !strcmp(eventName, dataBLEW)){
+       serial_on_recv((char*)buffer, bufferLen);
      } else {
 #endif
        JsVar *evt = jsvNewObject();
