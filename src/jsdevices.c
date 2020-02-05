@@ -264,6 +264,8 @@ IOEventFlags jshGetDeviceToTransmit() {
   return IOEVENTFLAGS_GETTYPE(txBuffer[txTail].flags);
 }
 
+static bool gettingChar = false;
+
 /**
  * Try and get a character for transmission.
  * \return The next byte to transmit or -1 if there is none.
@@ -271,14 +273,20 @@ IOEventFlags jshGetDeviceToTransmit() {
 int jshGetCharToTransmit(
     IOEventFlags device // The device being looked at for a transmission.
   ) {
+
+  if(gettingChar) return -1;
+  gettingChar = true;
+
   if (DEVICE_HAS_DEVICE_STATE(device)) {
     JshSerialDeviceState *deviceState = &jshSerialDeviceStates[TO_SERIAL_DEVICE_STATE(device)];
     if ((*deviceState)&SDS_XOFF_PENDING) {
       (*deviceState) = ((*deviceState)&(~SDS_XOFF_PENDING)) | SDS_XOFF_SENT;
+      gettingChar = false;
       return 19/*XOFF*/;
     }
     if ((*deviceState)&SDS_XON_PENDING) {
       (*deviceState) = ((*deviceState)&(~(SDS_XON_PENDING|SDS_XOFF_SENT)));
+      gettingChar = false;
       return 17/*XON*/;
     }
   }
@@ -298,10 +306,12 @@ int jshGetCharToTransmit(
         }
       }
       txTail = (unsigned char)((txTail+1)&TXBUFFERMASK); // advance the tail
+      gettingChar = false;
       return data; // return data
     }
     tempTail = (unsigned char)((tempTail+1)&TXBUFFERMASK);
   }
+  gettingChar = false;
   return -1; // no data :(
 }
 
