@@ -69,7 +69,7 @@ int main()
   gpio_mode(LED1_PININDEX, JSHPINSTATE_GPIO_OUT);
 
   onex_set_evaluators("evaluate_button", evaluate_edit_rule, evaluate_button_io, 0);
-  onex_set_evaluators("evaluate_light", evaluate_edit_rule, evaluate_light_logic, evaluate_light_io, 0);
+  onex_set_evaluators("evaluate_light",  evaluate_edit_rule, evaluate_light_logic, evaluate_light_io, 0);
   onex_set_evaluators("evaluate_device", evaluate_device_logic, 0);
 
   button=object_new(0, "evaluate_button", "editable button", 4);
