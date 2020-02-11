@@ -491,41 +491,51 @@ void jsfDebugFiles() {
   } while (jsfGetNextFileHeader(&addr, &header, GNFH_GET_ALL));
 }
 
-JsVar *jsfReadFile(JsfFileName name) {
+JsVar *jsfReadFile(JsfFileName name, int offset, int length) {
   JsfFileHeader header;
   uint32_t addr = jsfFindFile(name, &header);
   if (!addr) return 0;
-#ifdef LINUX
-  // linux fakes flash with a file, so we can't just return a pointer to it!
-  uint32_t alignedSize = jsfAlignAddress(jsfGetFileSize(&header));
-  char *d = (char*)malloc(alignedSize);
-  jshFlashRead(d, addr, alignedSize);
-  JsVar *v = jsvNewStringOfLength(jsfGetFileSize(&header), d);
-  free(d);
-  return v;
-#else
+  // clip requested read lengths
+  if (offset<0) offset=0;
+  uint32_t fileLen = jsfGetFileSize(&header);
+  if (length<=0) length=fileLen;
+  if (offset>fileLen) offset=fileLen;
+  if (offset+length>fileLen) length=fileLen-offset;
+  if (length<=0) return jsvNewFromEmptyString();
+  // now increment address by offset
+  addr += offset;
+
   size_t mappedAddr = jshFlashGetMemMapAddress((size_t)addr);
-  uint32_t len = jsfGetFileSize(&header);
 #ifdef SPIFLASH_BASE // if using SPI flash it can't be memory-mapped
   if (!mappedAddr) {
-    JsVar *v = jsvNewStringOfLength(len, NULL);
+    /*JsVar *v = jsvNewStringOfLength(length, NULL);
     if (v) {
       JsvStringIterator it;
       jsvStringIteratorNew(&it, v, 0);
-      while (len && jsvStringIteratorHasChar(&it)) {
+      while (length && jsvStringIteratorHasChar(&it)) {
         unsigned char *data;
         unsigned int l = 0;
         jsvStringIteratorGetPtrAndNext(&it, &data, &l);
         jshFlashRead(data, addr, l);
         addr += l;
-        len -= l;
+        length -= l;
       }
       jsvStringIteratorFree(&it);
     }
-    return v;
+    return v;*/
+    return jsvNewFlashString((char*)addr, length);
   }
 #endif
-  return jsvNewNativeString((char*)mappedAddr, len);
+#ifdef LINUX
+  // linux fakes flash with a file, so we can't just return a pointer to it!
+  uint32_t alignedSize = jsfAlignAddress(length);
+  char *d = (char*)malloc(alignedSize);
+  jshFlashRead(d, addr, alignedSize);
+  JsVar *v = jsvNewStringOfLength(length, d);
+  free(d);
+  return v;
+#else
+  return jsvNewNativeString((char*)mappedAddr, length);
 #endif
 }
 
@@ -744,9 +754,9 @@ void jsfSaveBootCodeToFlash(JsVar *code, bool runAfterReset) {
 }
 
 JsVar *jsfGetBootCodeFromFlash(bool isReset) {
-  JsVar *resetCode = jsfReadFile(jsfNameFromString(SAVED_CODE_BOOTCODE_RESET));
+  JsVar *resetCode = jsfReadFile(jsfNameFromString(SAVED_CODE_BOOTCODE_RESET),0,0);
   if (isReset || resetCode) return resetCode;
-  return jsfReadFile(jsfNameFromString(SAVED_CODE_BOOTCODE));
+  return jsfReadFile(jsfNameFromString(SAVED_CODE_BOOTCODE),0,0);
 }
 
 bool jsfLoadBootCodeFromFlash(bool isReset) {
@@ -754,7 +764,7 @@ bool jsfLoadBootCodeFromFlash(bool isReset) {
   char filename[7] = ".bootX";
   for (int i=0;i<4;i++) {
     filename[5] = (char)('0'+i);
-    JsVar *code = jsfReadFile(jsfNameFromString(filename));
+    JsVar *code = jsfReadFile(jsfNameFromString(filename),0,0);
     if (code)
       jsvUnLock2(jspEvaluateVar(code,0,0), code);
   }

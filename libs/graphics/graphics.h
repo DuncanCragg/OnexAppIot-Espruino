@@ -28,8 +28,7 @@ typedef enum {
   JSGRAPHICSTYPE_FSMC,        ///< FSMC (or fake FSMC) ILI9325 16bit-wide LCDs
   JSGRAPHICSTYPE_SDL,         ///< SDL graphics library for linux
   JSGRAPHICSTYPE_SPILCD,      ///< SPI LCD library
-  JSGRAPHICSTYPE_ST7789_8BIT,  ///< ST7789 in 8 bit mode
-  JSGRAPHICSTYPE_EMSCRIPTEN  ///< Output for Emscripten
+  JSGRAPHICSTYPE_ST7789_8BIT  ///< ST7789 in 8 bit mode
 } JsGraphicsType;
 
 typedef enum {
@@ -70,6 +69,11 @@ typedef enum {
 #define JSGRAPHICS_CUSTOMFONT_FIRSTCHAR JS_HIDDEN_CHAR_STR"fn1"
 
 typedef struct {
+  unsigned short x1,y1;
+  unsigned short x2,y2;
+} PACKED_FLAGS JsGraphicsClipRect;
+
+typedef struct {
   JsGraphicsType type;
   JsGraphicsFlags flags;
   unsigned short width, height; // DEVICE width and height (flags could mean the device is rotated)
@@ -83,6 +87,7 @@ typedef struct {
   unsigned char fontRotate : 2;
 #endif
 #ifndef SAVE_ON_FLASH
+  JsGraphicsClipRect clipRect;
   short modMinX, modMinY, modMaxX, modMaxY; ///< area that has been modified
 #endif
 } PACKED_FLAGS JsGraphicsData;
@@ -103,7 +108,7 @@ typedef struct JsGraphics {
 /// Reset graphics structure state (eg font size, color, etc)
 void graphicsStructResetState(JsGraphics *gfx);
 /// Completely reset graphics structure including flags
-void graphicsStructInit(JsGraphics *gfx);
+void graphicsStructInit(JsGraphics *gfx, int width, int height, int bpp);
 /// Access the Graphics Instance JsVar and get the relevant info in a JsGraphics structure. True on success
 bool graphicsGetFromVar(JsGraphics *gfx, JsVar *parent);
 /// Access the Graphics Instance JsVar and set the relevant info from JsGraphics structure

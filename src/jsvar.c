@@ -71,10 +71,17 @@ bool jsvIsInt(const JsVar *v) { return v && ((v->flags&JSV_VARTYPEMASK)==JSV_INT
 bool jsvIsFloat(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)==JSV_FLOAT; }
 bool jsvIsBoolean(const JsVar *v) { return v && ((v->flags&JSV_VARTYPEMASK)==JSV_BOOLEAN || (v->flags&JSV_VARTYPEMASK)==JSV_NAME_INT_BOOL); }
 bool jsvIsString(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)>=_JSV_STRING_START && (v->flags&JSV_VARTYPEMASK)<=_JSV_STRING_END; } ///< String, or a NAME too
-bool jsvIsBasicString(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)>=JSV_STRING_0 && (v->flags&JSV_VARTYPEMASK)<=JSV_STRING_MAX; } ///< Just a string (NOT a name)
+bool jsvIsBasicString(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)>=JSV_STRING_0 && (v->flags&JSV_VARTYPEMASK)<=JSV_STRING_MAX; } ///< Just a string (NOT a name/flatstr/nativestr or flashstr)
 bool jsvIsStringExt(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)>=JSV_STRING_EXT_0 && (v->flags&JSV_VARTYPEMASK)<=JSV_STRING_EXT_MAX; } ///< The extra bits dumped onto the end of a string to store more data
 bool jsvIsFlatString(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)==JSV_FLAT_STRING; }
 bool jsvIsNativeString(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)==JSV_NATIVE_STRING; }
+bool jsvIsFlashString(const JsVar *v) {
+#ifdef SPIFLASH_BASE
+  return v && (v->flags&JSV_VARTYPEMASK)==JSV_FLASH_STRING;
+#else
+  return false;
+#endif
+}
 bool jsvIsNumeric(const JsVar *v) { return v && (v->flags&JSV_VARTYPEMASK)>=_JSV_NUMERIC_START && (v->flags&JSV_VARTYPEMASK)<=_JSV_NUMERIC_END; }
 bool jsvIsFunction(const JsVar *v) { return v && ((v->flags&JSV_VARTYPEMASK)==JSV_FUNCTION || (v->flags&JSV_VARTYPEMASK)==JSV_FUNCTION_RETURN); }
 bool jsvIsFunctionReturn(const JsVar *v) { return v && ((v->flags&JSV_VARTYPEMASK)==JSV_FUNCTION_RETURN); } ///< Is this a function with an implicit 'return' at the start?
@@ -406,8 +413,13 @@ size_t jsvGetCharactersInVar(const JsVar *v) {
   unsigned int f = v->flags&JSV_VARTYPEMASK;
   if (f == JSV_FLAT_STRING)
     return (size_t)v->varData.integer;
-  if (f == JSV_NATIVE_STRING)
+  if ((f == JSV_NATIVE_STRING)
+#ifdef SPIFLASH_BASE
+  || (f == JSV_FLASH_STRING)
+#endif
+      )
     return (size_t)v->varData.nativeStr.len;
+
   assert(f >= JSV_NAME_STRING_INT_0);
   assert((JSV_NAME_STRING_INT_0 < JSV_NAME_STRING_0) &&
          (JSV_NAME_STRING_0 < JSV_STRING_0) &&
@@ -427,7 +439,7 @@ size_t jsvGetCharactersInVar(const JsVar *v) {
 /// This is the number of characters a JsVar can contain, NOT string length
 void jsvSetCharactersInVar(JsVar *v, size_t chars) {
   unsigned int f = v->flags&JSV_VARTYPEMASK;
-  assert(!(jsvIsFlatString(v) || jsvIsNativeString(v)));
+  assert(!(jsvIsFlatString(v) || jsvIsNativeString(v) || jsvIsFlashString(v)));
 
   JsVarFlags m = (JsVarFlags)(v->flags&~JSV_VARTYPEMASK);
   assert(f >= JSV_NAME_STRING_INT_0);
@@ -1024,6 +1036,17 @@ JsVar *jsvNewNativeString(char *ptr, size_t len) {
   str->varData.nativeStr.len = len;
   return str;
 }
+
+#ifdef SPIFLASH_BASE
+JsVar *jsvNewFlashString(char *ptr, size_t len) {
+  if (len>JSV_NATIVE_STR_MAX_LENGTH) len=JSV_NATIVE_STR_MAX_LENGTH; // crop string to what we can store in nativeStr.len
+    JsVar *str = jsvNewWithFlags(JSV_FLASH_STRING);
+    if (!str) return 0;
+    str->varData.nativeStr.ptr = ptr;
+    str->varData.nativeStr.len = len;
+    return str;
+}
+#endif
 
 /// Create a new ArrayBuffer backed by the given string. If length is not specified, it will be worked out
 JsVar *jsvNewArrayBufferFromString(JsVar *str, unsigned int lengthOrZero) {
@@ -1767,7 +1790,7 @@ bool jsvIsStringNumericInt(const JsVar *var, bool allowDecimalPoint) {
     buf[1] = jsvStringIteratorGetChar(&it);
     buf[2] = 0;
     const char *p = buf;
-    radix = getRadix(&p,0,0);
+    radix = getRadix(&p,0);
     if (p>&buf[1]) jsvStringIteratorNext(&it);
   }
   if (radix==0) radix=10;
@@ -2429,7 +2452,7 @@ JsVar *jsvCopy(JsVar *src, bool copyChildren) {
   JsVar *dst = jsvNewWithFlags(src->flags & JSV_VARIABLEINFOMASK);
   if (!dst) return 0; // out of memory
   if (!jsvIsStringExt(src)) {
-      bool refsAsData = jsvIsBasicString(src)||jsvIsNativeString(src)||jsvIsNativeFunction(src);
+      bool refsAsData = jsvIsBasicString(src)||jsvIsNativeString(src)||jsvIsFlashString(src)||jsvIsNativeFunction(src);
       memcpy(&dst->varData, &src->varData, refsAsData ? JSVAR_DATA_STRING_LEN : JSVAR_DATA_STRING_NAME_LEN);
       if (jsvIsNativeFunction(src)) {
         jsvSetFirstChild(dst,0);
@@ -3337,7 +3360,8 @@ bool jsvMathsOpTypeEqual(JsVar *a, JsVar *b) {
     // Check whether both are numbers, otherwise check the variable
     // type flags themselves
     eql = ((jsvIsInt(a)||jsvIsFloat(a)) && (jsvIsInt(b)||jsvIsFloat(b))) ||
-        ((a->flags & JSV_VARTYPEMASK) == (b->flags & JSV_VARTYPEMASK));
+          (jsvIsString(a) && jsvIsString(b)) ||
+          ((a->flags & JSV_VARTYPEMASK) == (b->flags & JSV_VARTYPEMASK));
   }
   if (eql) {
     JsVar *contents = jsvMathsOp(a,b, LEX_EQUAL);
@@ -3461,8 +3485,12 @@ JsVar *jsvMathsOp(JsVar *a, JsVar *b, int op) {
       return 0;
     }
     if (op=='+') {
-      JsVar *v = jsvCopy(da, false);
-      // TODO: can we be fancy and not copy da if we know it isn't reffed? what about locks?
+      JsVar *v;
+      // Don't copy 'da' if it's not used elsewhere (eg we made it in 'jsvAsString' above)
+      if (jsvIsBasicString(da) && jsvGetLocks(da)==1 && jsvGetRefs(da)==0)
+        v = jsvLockAgain(da);
+      else
+        v = jsvCopy(da, false);
       if (v) // could be out of memory
         jsvAppendStringVarComplete(v, db);
       jsvUnLock2(da, db);
@@ -3627,7 +3655,11 @@ void _jsvTrace(JsVar *var, int indent, JsVar *baseVar, int level) {
     if (jsvIsFlatString(var)) {
       blocks += jsvGetFlatStringBlocks(var);
     }
-    jsiConsolePrintf("%sString [%d blocks] %q", jsvIsFlatString(var)?"Flat":(jsvIsNativeString(var)?"Native":""), blocks, var);
+    const char *name = "";
+    if (jsvIsFlatString(var)) name="Flat";
+    if (jsvIsNativeString(var)) name="Native";
+    if (jsvIsFlashString(var)) name="Flash";
+    jsiConsolePrintf("%sString [%d blocks] %q", name, blocks, var);
   } else {
     jsiConsolePrintf("Unknown %d", var->flags & (JsVarFlags)~(JSV_LOCK_MASK));
   }

@@ -17,6 +17,13 @@
 #include "jsvar.h"
 #include "graphics.h"
 
+#ifdef GRAPHICS_PALETTED_IMAGES
+// 16 color MAC OS palette
+extern const uint16_t PALETTE_4BIT[16];
+// 256 color 16 bit Web-safe palette
+extern const uint16_t PALETTE_8BIT[256];
+#endif
+
 bool jswrap_graphics_idle();
 void jswrap_graphics_init();
 
@@ -31,6 +38,7 @@ JsVar *jswrap_graphics_createImage(JsVar *data);
 
 
 int jswrap_graphics_getWidthOrHeight(JsVar *parent, bool height);
+JsVar *jswrap_graphics_reset(JsVar *parent);
 JsVar *jswrap_graphics_clear(JsVar *parent, bool resetState);
 JsVar *jswrap_graphics_fillRect(JsVar *parent, int x1, int y1, int x2, int y2);
 JsVar *jswrap_graphics_clearRect(JsVar *parent, int x1, int y1, int x2, int y2);
@@ -41,8 +49,10 @@ JsVar *jswrap_graphics_drawEllipse(JsVar *parent, int x, int y, int x2, int y2);
 JsVar *jswrap_graphics_fillEllipse(JsVar *parent, int x, int y, int x2, int y2);
 int jswrap_graphics_getPixel(JsVar *parent, int x, int y);
 JsVar *jswrap_graphics_setPixel(JsVar *parent, int x, int y, JsVar *color);
+unsigned int jswrap_graphics_toColor(JsVar *parent, JsVar *r, JsVar *g, JsVar *b);
 JsVar *jswrap_graphics_setColorX(JsVar *parent, JsVar *r, JsVar *g, JsVar *b, bool isForeground);
 JsVarInt jswrap_graphics_getColorX(JsVar *parent, bool isForeground);
+JsVar *jswrap_graphics_setClipRect(JsVar *parent, int x1, int y1, int x2, int y2);
 JsVar *jswrap_graphics_setFontSizeX(JsVar *parent, int size, bool isVectorFont);
 JsVar *jswrap_graphics_setFontCustom(JsVar *parent, JsVar *bitmap, int firstChar, JsVar *width, int height);
 JsVar *jswrap_graphics_setFontAlign(JsVar *parent, int x, int y, int r);

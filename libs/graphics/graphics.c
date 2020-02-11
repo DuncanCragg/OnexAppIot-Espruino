@@ -37,9 +37,6 @@
 #ifdef USE_LCD_ST7789_8BIT
 #include "lcd_st7789_8bit.h"
 #endif
-#ifdef USE_LCD_EMSCRTIPTEN
-#include "lcd_emscripten.h"
-#endif
 
 // ----------------------------------------------------------------------------------------------
 
@@ -94,8 +91,8 @@ void graphicsFallbackScroll(JsGraphics *gfx, int xdir, int ydir) {
 #ifndef SAVE_ON_FLASH
   gfx->data.modMinX=0;
   gfx->data.modMinY=0;
-  gfx->data.modMaxX=gfx->data.width-1;
-  gfx->data.modMaxY=gfx->data.height-1;
+  gfx->data.modMaxX=(short)(gfx->data.width-1);
+  gfx->data.modMaxY=(short)(gfx->data.height-1);
 #endif
 }
 
@@ -109,14 +106,21 @@ void graphicsStructResetState(JsGraphics *gfx) {
   gfx->data.fontAlignX = 3;
   gfx->data.fontAlignY = 3;
   gfx->data.fontRotate = 0;
+  gfx->data.clipRect.x1 = 0;
+  gfx->data.clipRect.y1 = 0;
+  gfx->data.clipRect.x2 = (unsigned short)(gfx->data.width-1);
+  gfx->data.clipRect.y2 = (unsigned short)(gfx->data.height-1);
 #endif
   gfx->data.cursorX = 0;
   gfx->data.cursorY = 0;
 }
 
-void graphicsStructInit(JsGraphics *gfx) {
+void graphicsStructInit(JsGraphics *gfx, int width, int height, int bpp) {
   // type/width/height/bpp should be set elsewhere...
   gfx->data.flags = JSGRAPHICSFLAGS_NONE;
+  gfx->data.width = (unsigned short)width;
+  gfx->data.height = (unsigned short)height;
+  gfx->data.bpp = (unsigned char)bpp;
   graphicsStructResetState(gfx);
 #ifndef SAVE_ON_FLASH
   gfx->data.modMaxX = -32768;
@@ -124,6 +128,7 @@ void graphicsStructInit(JsGraphics *gfx) {
   gfx->data.modMinX = 32767;
   gfx->data.modMinY = 32767;
 #endif
+
 }
 
 bool graphicsGetFromVar(JsGraphics *gfx, JsVar *parent) {
@@ -161,10 +166,6 @@ bool graphicsGetFromVar(JsGraphics *gfx, JsVar *parent) {
     } else if (gfx->data.type == JSGRAPHICSTYPE_ST7789_8BIT) {
       lcdST7789_setCallbacks(gfx);
 #endif
-#ifdef USE_LCD_EMSCRTIPTEN
-    } else if (gfx->data.type == JSGRAPHICSTYPE_EMSCRIPTEN) {
-      lcdEmscripten_setCallbacks(gfx);
-#endif
     } else {
       jsExceptionHere(JSET_INTERNALERROR, "Unknown graphics type\n");
       assert(0);
@@ -190,7 +191,7 @@ void graphicsSetVar(JsGraphics *gfx) {
 
 /// Get the memory requires for this graphics's pixels if everything was packed as densely as possible
 size_t graphicsGetMemoryRequired(const JsGraphics *gfx) {
-  return (gfx->data.width * gfx->data.height * gfx->data.bpp + 7) >> 3;
+  return (size_t)(gfx->data.width * gfx->data.height * gfx->data.bpp + 7) >> 3;
 };
 
 // ----------------------------------------------------------------------------------------------
@@ -209,7 +210,14 @@ void graphicsToDeviceCoordinates(const JsGraphics *gfx, int *x, int *y) {
 // ----------------------------------------------------------------------------------------------
 
 static void graphicsSetPixelDevice(JsGraphics *gfx, int x, int y, unsigned int col) {
+#ifdef SAVE_ON_FLASH
   if (x<0 || y<0 || x>=gfx->data.width || y>=gfx->data.height) return;
+#else
+  if (x<gfx->data.clipRect.x1 ||
+      y<gfx->data.clipRect.y1 ||
+      x>gfx->data.clipRect.x2 ||
+      y>gfx->data.clipRect.y2) return;
+#endif
 #ifndef SAVE_ON_FLASH
   if (x < gfx->data.modMinX) gfx->data.modMinX=(short)x;
   if (x > gfx->data.modMaxX) gfx->data.modMaxX=(short)x;
@@ -235,10 +243,17 @@ static void graphicsFillRectDevice(JsGraphics *gfx, int x1, int y1, int x2, int 
     y1 = y2;
     y2 = t;
   }
-  if (x1<0) x1=0;
-  if (y1<0) y1=0;
+#ifdef SAVE_ON_FLASH
+  if (x1<0) x1 = 0;
+  if (y1<0) y1 = 0;
   if (x2>=gfx->data.width) x2 = gfx->data.width - 1;
   if (y2>=gfx->data.height) y2 = gfx->data.height - 1;
+#else
+  if (x1<gfx->data.clipRect.x1) x1 = gfx->data.clipRect.x1;
+  if (y1<gfx->data.clipRect.y1) y1 = gfx->data.clipRect.y1;
+  if (x2>gfx->data.clipRect.x2) x2 = gfx->data.clipRect.x2;
+  if (y2>gfx->data.clipRect.y2) y2 = gfx->data.clipRect.y2;
+#endif
   if (x2<x1 || y2<y1) return; // nope
 #ifndef SAVE_ON_FLASH
   if (x1 < gfx->data.modMinX) gfx->data.modMinX=(short)x1;
@@ -292,65 +307,63 @@ void graphicsDrawRect(JsGraphics *gfx, int x1, int y1, int x2, int y2) {
 void graphicsDrawEllipse(JsGraphics *gfx, int posX1, int posY1, int posX2, int posY2){
   graphicsToDeviceCoordinates(gfx, &posX1, &posY1);
   graphicsToDeviceCoordinates(gfx, &posX2, &posY2);
-  int posX = (posX1+posX2)/2;
-  int posY = (posY1+posY2)/2;
-  int width = (posX2-posX1)/2;
-  int height = (posY2-posY1)/2;
-  if (width<0) width=-width;
-  if (height<0) height=-height;
-  int hh = height * height;
-  int ww = width * width;
-  int hhww = hh * ww;
-  int x0 = width;
+
+  int posX =  (posX1+posX2)/2;
+  int posY =  (posY1+posY2)/2;
+  int a = (posX2-posX1)/2;
+  int b = (posY2-posY1)/2;
   int dx = 0;
-  int y;
-  graphicsSetPixelDevice(gfx,posX - width,posY,gfx->data.fgColor);
-  graphicsSetPixelDevice(gfx,posX + width,posY,gfx->data.fgColor);
-  for (y = 1; y <= height; y++) {
-    int x1 = x0 - (dx - 1);
-    for(; x1> 0; x1--)
-      if (x1 * x1 * hh + y * y * ww <= hhww)
-        break;
-    dx = x0 - x1;
-    x0 = x1;
-    if(dx<2){
-      graphicsSetPixelDevice(gfx,posX - x0, posY - y,gfx->data.fgColor);
-      graphicsSetPixelDevice(gfx,posX + x0, posY - y,gfx->data.fgColor);
-      graphicsSetPixelDevice(gfx,posX - x0, posY + y,gfx->data.fgColor);
-      graphicsSetPixelDevice(gfx,posX + x0, posY + y,gfx->data.fgColor);
-    } else {
-      graphicsFillRectDevice(gfx,posX - x0, posY - y, posX - x0 - dx + 1, posY - y,gfx->data.fgColor);
-      graphicsFillRectDevice(gfx,posX + x0, posY - y, posX + x0 + dx - 1, posY	- y,gfx->data.fgColor);
-      graphicsFillRectDevice(gfx,posX - x0, posY + y, posX - x0 - dx + 1, posY + y,gfx->data.fgColor);
-      graphicsFillRectDevice(gfx,posX + x0, posY + y, posX + x0 + dx - 1, posY + y,gfx->data.fgColor);
-    }
+  int dy = b;
+  int a2 = a*a;
+  int b2 = b*b;
+  int err = b2-(2*b-1)*a2;
+  int e2; 
+  bool changed = false;
+
+  do {
+    changed = false;
+    graphicsSetPixelDevice(gfx,posX+dx,posY+dy,gfx->data.fgColor);
+    graphicsSetPixelDevice(gfx,posX-dx,posY+dy,gfx->data.fgColor);
+    graphicsSetPixelDevice(gfx,posX+dx,posY-dy,gfx->data.fgColor);
+    graphicsSetPixelDevice(gfx,posX-dx,posY-dy,gfx->data.fgColor);
+    e2 = 2*err;
+    if (e2 <  (2*dx+1)*b2) { dx++; err += (2*dx+1)*b2; changed=true; }
+    if (e2 > -(2*dy-1)*a2) { dy--; err -= (2*dy-1)*a2; changed=true; }
+  } while (changed && dy >= 0);
+
+  while (dx++ < a) { /* erroneous termination in flat ellipses (b=1) */
+       graphicsSetPixelDevice(gfx,posX+dx,posY,gfx->data.fgColor);
+       graphicsSetPixelDevice(gfx,posX-dx,posY,gfx->data.fgColor);
   }
 }
 
 void graphicsFillEllipse(JsGraphics *gfx, int posX1, int posY1, int posX2, int posY2){
   graphicsToDeviceCoordinates(gfx, &posX1, &posY1);
   graphicsToDeviceCoordinates(gfx, &posX2, &posY2);
-  int posX = (posX1+posX2)/2;
-  int posY = (posY1+posY2)/2;
-  int width = (posX2-posX1)/2;
-  int height = (posY2-posY1)/2;
-  if (width<0) width=-width;
-  if (height<0) height=-height;
-  int hh = height * height;
-  int ww = width * width;
-  int hhww = hh * ww;
-  int x0 = width;
+
+  int posX =  (posX1+posX2)/2;
+  int posY =  (posY1+posY2)/2;
+  int a = (posX2-posX1)/2;
+  int b = (posY2-posY1)/2;
   int dx = 0;
-  graphicsFillRectDevice(gfx, posX - width, posY, posX + width, posY,gfx->data.fgColor);
-  for (int y = 1; y <= height; y++) {
-    int x1 = x0 - (dx - 1);
-    for ( ; x1 > 0; x1--)
-      if (x1*x1*hh + y*y*ww <= hhww)
-        break;
-    dx = x0 - x1;  
-    x0 = x1;
-	  graphicsFillRectDevice(gfx, posX - x0, posY - y, posX + x0, posY - y,gfx->data.fgColor);
-	  graphicsFillRectDevice(gfx, posX - x0, posY + y, posX + x0, posY + y,gfx->data.fgColor);
+  int dy = b;
+  int a2 = a*a;
+  int b2 = b*b;
+  int err = b2-(2*b-1)*a2;
+  int e2; 
+  bool changed = false;
+
+  do {
+    changed = false;
+    graphicsFillRectDevice(gfx,posX+dx,posY+dy,posX-dx,posY+dy,gfx->data.fgColor);
+    graphicsFillRectDevice(gfx,posX+dx,posY-dy,posX-dx,posY-dy,gfx->data.fgColor);
+    e2 = 2*err;
+    if (e2 <  (2*dx+1)*b2) { dx++; err += (2*dx+1)*b2; changed=true; }
+    if (e2 > -(2*dy-1)*a2) { dy--; err -= (2*dy-1)*a2; changed=true; }
+  } while (changed && dy >= 0);
+
+  while (dx++ < a) { /* erroneous termination in flat ellipses(b=1) */
+       graphicsFillRectDevice(gfx,posX+dx,posY,posX-dx,posY,gfx->data.fgColor );
   }
 }
 
@@ -391,70 +404,81 @@ void graphicsDrawLine(JsGraphics *gfx, int x1, int y1, int x2, int y2) {
   }
 }
 
-static inline void graphicsFillPolyCreateScanLines(JsGraphics *gfx, short *minx, short *maxx, short x1, short y1,short x2, short y2) {
-  if (y2 < y1) {
-    short t;
-    t=x1;x1=x2;x2=t;
-    t=y1;y1=y2;y2=t;
-  }
-  int xh = x1*256 + 128/*do rounding here rather than when we >>8*/;
-  int yl = (1+y2)-y1;
-  int stepx = ((x2-x1)*256 + (yl/2)/*rounding*/) / yl;
-  short y;
-  int x = xh>>8;
-  if (x<-32768) x=-32768;
-  if (x>32767) x=32767;
-  for (y=y1;y<=y2;y++) {
-    int oldx = x;
-    xh += stepx;
-    x = xh>>8;
-    if (x<-32768) x=-32768;
-    if (x>32767) x=32767;
-    if (y>=0 && y<gfx->data.height) {
-      if (oldx<minx[y]) minx[y] = (short)oldx;
-      if (oldx>maxx[y]) maxx[y] = (short)oldx;
-      if (x<minx[y]) minx[y] = (short)x;
-      if (x>maxx[y]) maxx[y] = (short)x;
-    }
-  }
-}
+
 
 void graphicsFillPoly(JsGraphics *gfx, int points, short *vertices) {
-  int i;
+  typedef struct {
+    short x,y;
+  } VertXY;
+  VertXY *v = (VertXY*)vertices;
+
+  int i,j,y;
   int miny = (int)(gfx->data.height-1);
   int maxy = 0;
-  for (i=0;i<points*2;i+=2) {
+  for (i=0;i<points;i++) {
     // convert into device coordinates...
-    graphicsToDeviceCoordinates(gfx, &vertices[i], &vertices[i+1]);
-    short y = vertices[i+1];
+    int vx = v[i].x;
+    int vy = v[i].y;
+    graphicsToDeviceCoordinates(gfx, &vx, &vy);
+    v[i].x = (short)vx;
+    v[i].y = (short)vy;
+    // work out min and max
+    short y = v[i].y;
     if (y<miny) miny=y;
     if (y>maxy) maxy=y;
   }
+#ifndef SAVE_ON_FLASH
+  if (miny < gfx->data.clipRect.y1) miny=gfx->data.clipRect.y1;
+  if (maxy > gfx->data.clipRect.y2) maxy=gfx->data.clipRect.y2;
+#else
   if (miny<0) miny=0;
   if (maxy>=gfx->data.height) maxy=(int)(gfx->data.height-1);
-  short minx[gfx->data.height];
-  short maxx[gfx->data.height];
-  int y;
+#endif
+
+  const int MAX_CROSSES = 64;
+
+  // for each scanline
   for (y=miny;y<=maxy;y++) {
-    minx[y] = (short)(gfx->data.width);
-    maxx[y] = -1;
-  }
-  int j = (points-1)*2;
-  for (i=0;i<points*2;i+=2) {
-    graphicsFillPolyCreateScanLines(gfx, minx, maxx, vertices[j+0], vertices[j+1], vertices[i+0], vertices[i+1]);
-    j = i;
-  }
-  for (y=miny;y<=maxy;y++) {
-    if (maxx[y]>=minx[y] && maxx[y]>=0 && minx[y]<gfx->data.width) {
-      // clip
-      if (minx[y]<0) minx[y]=0;
-      if (maxx[y]>=gfx->data.width) maxx[y]=(short)(gfx->data.width-1);
-      // try and expand the rect that we fill
-      int oldy = y;
-      while (y<maxy && minx[y+1]==minx[oldy] && maxx[y+1]==maxx[oldy])
-        y++;
-      // actually fill
-      graphicsFillRectDevice(gfx,minx[y],oldy,maxx[y],y,gfx->data.fgColor);
+    short cross[MAX_CROSSES];
+    bool slopes[MAX_CROSSES];
+    int crosscnt = 0;
+    // work out all the times lines cross the scanline
+    j = points-1;
+    for (i=0;i<points;i++) {
+      if ((y==miny && (v[i].y==y || v[j].y==y)) || // special-case top line
+          (v[i].y<y && v[j].y>=y) ||
+          (v[j].y<y && v[i].y>=y)) {
+        if (crosscnt < MAX_CROSSES) {
+          int l = v[j].y - v[i].y;
+          if (l) { // don't do horiz lines - rely on the ends of the lines that join onto them
+            cross[crosscnt] = (short)(v[i].x + ((y - v[i].y) * (v[j].x-v[i].x)) / l);
+            slopes[crosscnt] = (l>1)?1:0;
+            crosscnt++;
+          }
+        }
+      }
+      j = i;
+    }
+
+    // bubble sort
+    for (i=0;i<crosscnt-1;) {
+      if (cross[i]>cross[i+1]) {
+        short t=cross[i];
+        cross[i]=cross[i+1];
+        cross[i+1]=t;
+        bool ts=slopes[i];
+        slopes[i]=slopes[i+1];
+        slopes[i+1]=ts;
+        if (i) i--;
+      } else i++;
+    }
+
+    //  Fill the pixels between node pairs.
+    int x = 0,s = 0;
+    for (i=0;i<crosscnt;i++) {
+      if (s==0) x=cross[i];
+      if (slopes[i]) s++; else s--;
+      if (!s || i==crosscnt-1) graphicsFillRectDevice(gfx,x,y,cross[i],y,gfx->data.fgColor);
       if (jspIsInterrupted()) break;
     }
   }
@@ -484,7 +508,6 @@ unsigned int graphicsFillVectorChar(JsGraphics *gfx, int x1, int y1, int size, c
     idx+=2;
     if (READ_FLASH_UINT8(&vectorFontPolys[vertOffset+i+1]) & VECTOR_FONT_POLY_SEPARATOR) {
       graphicsFillPoly(gfx,idx/2, verts);
-
       if (jspIsInterrupted()) break;
       idx=0;
     }
@@ -495,7 +518,6 @@ unsigned int graphicsFillVectorChar(JsGraphics *gfx, int x1, int y1, int size, c
 // returns the width of a character
 unsigned int graphicsVectorCharWidth(JsGraphics *gfx, unsigned int size, char ch) {
   NOT_USED(gfx);
-  if (size<0) return 0;
   if (ch<vectorFontOffset || ch-vectorFontOffset>=vectorFontCount) return 0;
   unsigned char width = READ_FLASH_UINT8(&vectorFonts[ch-vectorFontOffset].width);
   return (width * (unsigned int)size)/(VECTOR_FONT_POLY_SIZE*2);

@@ -82,7 +82,9 @@ void jswrap_storage_erase(JsVar *name) {
   "name" : "read",
   "generate" : "jswrap_storage_read",
   "params" : [
-    ["name","JsVar","The filename - max 8 characters (case sensitive)"]
+    ["name","JsVar","The filename - max 8 characters (case sensitive)"],
+    ["offset","int","(optional) The offset in bytes to start from"],
+    ["length","int","(optional) The length to read in bytes (if <=0, the entire file is read)"]
   ],
   "return" : ["JsVar","A string of data"]
 }
@@ -96,8 +98,8 @@ If you evaluate this string with `eval`, any functions
 contained in the String will keep their code stored
 in flash memory.
 */
-JsVar *jswrap_storage_read(JsVar *name) {
-  return jsfReadFile(jsfNameFromVar(name));
+JsVar *jswrap_storage_read(JsVar *name, int offset, int length) {
+  return jsfReadFile(jsfNameFromVar(name), offset, length);
 }
 
 /*JSON{
@@ -118,7 +120,7 @@ and parse JSON in it into a JavaScript object.
 This is identical to `JSON.parse(require("Storage").read(...))`
 */
 JsVar *jswrap_storage_readJSON(JsVar *name) {
-  JsVar *v = jsfReadFile(jsfNameFromVar(name));
+  JsVar *v = jsfReadFile(jsfNameFromVar(name),0,0);
   if (!v) return 0;
   JsVar *r = jswrap_json_parse(v);
   jsvUnLock(v);
@@ -146,7 +148,7 @@ This can be used:
 * In a `Uint8Array/Float32Array/etc` with `new Uint8Array(require("Storage").readArrayBuffer("x"))`
 */
 JsVar *jswrap_storage_readArrayBuffer(JsVar *name) {
-  JsVar *v = jsfReadFile(jsfNameFromVar(name));
+  JsVar *v = jsfReadFile(jsfNameFromVar(name),0,0);
   if (!v) return 0;
   JsVar *r = jsvNewArrayBufferFromString(v, 0);
   jsvUnLock(v);
@@ -300,6 +302,8 @@ int jswrap_storage_getFree() {
 Open a file in the Storage area. This can be used for appending data
 (normal read/write operations only write the entire file).
 
+Please see `StorageFile` for more information (and examples).
+
 **Note:** These files write through immediately - they do not need closing.
 
 */
@@ -391,6 +395,45 @@ JsVar *jswrap_storage_open(JsVar *name, JsVar *modeVar) {
 These objects are created from `require("Storage").open`
 and allow Storage items to be read/written.
 
+The `Storage` library writes into Flash memory (which
+can only be erased in chunks), and unlike a normal filesystem
+it allocates files in one long contiguous area to allow them
+to be accessed easily from Espruino.
+
+This presents a challenge for `StorageFile` which allows you
+to append to a file, so instead `StorageFile` stores files
+in chunks. It uses 7 character filenames and uses the last
+character to denote the chunk number (eg `"foobar\1"`, `"foobar\2"`, etc).
+
+This means that while `StorageFile` files exist in the same
+area as those from `Storage`, they should be
+read using `StorageFile.open` (and not `Storage.read`).
+
+```
+f = s.open("foobar","w");
+f.write("Hell");
+f.write("o World\n");
+f.write("Hello\n");
+f.write("World 2\n");
+// there's no need to call 'close'
+// then
+f = s.open("foobar","r");
+f.read(13) // "Hello World\nH"
+f.read(13) // "ello\nWorld 2\n"
+f.read(13) // "Hello World 3"
+f.read(13) // "\n"
+f.read(13) // undefined
+// or
+f = s.open("foobar","r");
+f.readLine() // "Hello World\n"
+f.readLine() // "Hello\n"
+f.readLine() // "World 2\n"
+f.readLine() // "Hello World 3\n"
+f.readLine() // undefined
+// now get rid of file
+f.erase();
+```
+
 **Note:** `StorageFile` uses the fact that all bits of erased flash memory
 are 1 to detect the end of a file. As such you should not write character
 code 255 (`"\xFF"`) to these files.
@@ -480,10 +523,13 @@ JsVar *jswrap_storagefile_read_internal(JsVar *f, int len) {
   "params" : [
     ["len","int","How many bytes to read"]
   ],
-  "return" : ["JsVar","A String"],
+  "return" : ["JsVar","A String, or undefined "],
   "return_object" : "StorageFile"
 }
-Read data from the file
+Read 'len' bytes of data from the file, and return a String containing those bytes.
+
+If the end of the file is reached, the String may be smaller than the amount of bytes
+requested, or if the file is already at the end, `undefined` is returned.
 */
 JsVar *jswrap_storagefile_read(JsVar *f, int len) {
   if (len<0) len=0;
@@ -514,10 +560,10 @@ JsVar *jswrap_storagefile_readLine(JsVar *f) {
   "name" : "write",
   "generate" : "jswrap_storagefile_write",
   "params" : [
-    ["data","JsVar","The data to write"]
+    ["data","JsVar","The data to write. This should not include `'\\xFF'` (character code 255)"]
   ]
 }
-Append the given data to a file
+Append the given data to a file. You should not attempt to append  `"\xFF"` (character code 255).
 */
 void jswrap_storagefile_write(JsVar *f, JsVar *_data) {
   char mode = (char)jsvGetIntegerAndUnLock(jsvObjectGetChild(f,"mode",0));

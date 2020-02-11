@@ -62,6 +62,8 @@ const uint16_t PALETTE_8BIT[256] = {
     0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,
     0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0x0,0xffff
  };
+// map Mac to web-safe palette. Must be uint16_t because drawImage uses uint16_t* for palette
+const uint16_t PALETTE_4BIT_TO_8BIT[16] = { 0, 43, 129, 172, 121, 78, 12, 18, 23, 4, 39, 183, 144, 192, 210, 215 };
 #endif
 
 
@@ -71,7 +73,7 @@ const uint16_t PALETTE_8BIT[256] = {
 }
 This class provides Graphics operations that can be applied to a surface.
 
-Use Graphics.createXXX to create a graphics object that renders in the way you want. See [the Graphics page](/Graphics) for more information.
+Use Graphics.createXXX to create a graphics object that renders in the way you want. See [the Graphics page](https://www.espruino.com/Graphics) for more information.
 
 **Note:** On boards that contain an LCD, there is a built-in 'LCD' object of type Graphics. For instance to draw a line you'd type: ```LCD.drawLine(0,0,100,100)```
 */
@@ -96,12 +98,9 @@ void jswrap_graphics_init() {
     JsVar *parentObj = jsvSkipName(parent);
     jsvObjectSetChild(execInfo.hiddenRoot, JS_GRAPHICS_VAR, parentObj);
     JsGraphics gfx;
-    graphicsStructInit(&gfx);
+    graphicsStructInit(&gfx,320,240,16);
     gfx.data.type = JSGRAPHICSTYPE_FSMC;
     gfx.graphicsVar = parentObj;
-    gfx.data.width = 320;
-    gfx.data.height = 240;
-    gfx.data.bpp = 16;
     lcdInit_FSMC(&gfx);
     lcdSetCallbacks_FSMC(&gfx);
     graphicsSplash(&gfx);
@@ -169,13 +168,10 @@ JsVar *jswrap_graphics_createArrayBuffer(int width, int height, int bpp, JsVar *
   if (!parent) return 0; // low memory
 
   JsGraphics gfx;
-  graphicsStructInit(&gfx);
+  graphicsStructInit(&gfx,width,height,bpp);
   gfx.data.type = JSGRAPHICSTYPE_ARRAYBUFFER;
   gfx.data.flags = JSGRAPHICSFLAGS_NONE;
   gfx.graphicsVar = parent;
-  gfx.data.width = (unsigned short)width;
-  gfx.data.height = (unsigned short)height;
-  gfx.data.bpp = (unsigned char)bpp;
 
   if (jsvIsObject(options)) {
     if (jsvGetBoolAndUnLock(jsvObjectGetChild(options, "zigzag", 0)))
@@ -269,12 +265,9 @@ JsVar *jswrap_graphics_createCallback(int width, int height, int bpp, JsVar *cal
   if (!parent) return 0; // low memory
 
   JsGraphics gfx;
-  graphicsStructInit(&gfx);
+  graphicsStructInit(&gfx,width,height,bpp);
   gfx.data.type = JSGRAPHICSTYPE_JS;
   gfx.graphicsVar = parent;
-  gfx.data.width = (unsigned short)width;
-  gfx.data.height = (unsigned short)height;
-  gfx.data.bpp = (unsigned char)bpp;
   lcdInit_JS(&gfx, callbackSetPixel, callbackFillRect);
   graphicsSetVar(&gfx);
   jsvUnLock2(callbackSetPixel, callbackFillRect);
@@ -307,12 +300,9 @@ JsVar *jswrap_graphics_createSDL(int width, int height, int bpp) {
   JsVar *parent = jspNewObject(0, "Graphics");
   if (!parent) return 0; // low memory
   JsGraphics gfx;
-  graphicsStructInit(&gfx);
+  graphicsStructInit(&gfx,width,height,bpp);
   gfx.data.type = JSGRAPHICSTYPE_SDL;
   gfx.graphicsVar = parent;
-  gfx.data.width = (unsigned short)width;
-  gfx.data.height = (unsigned short)height;
-  gfx.data.bpp = bpp;
   lcdInit_SDL(&gfx);
   graphicsSetVar(&gfx);
   return parent;
@@ -441,10 +431,31 @@ int jswrap_graphics_getWidthOrHeight(JsVar *parent, bool height) {
 /*JSON{
   "type" : "method",
   "class" : "Graphics",
+  "name" : "reset",
+  "generate" : "jswrap_graphics_reset",
+  "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
+  "return_object" : "Graphics"
+}
+Reset the state of Graphics to the defaults (eg. Color, Font, etc)
+that would have been used when Graphics was initialised.
+*/
+JsVar *jswrap_graphics_reset(JsVar *parent) {
+  JsGraphics gfx; if (!graphicsGetFromVar(&gfx, parent)) return 0;
+  // reset font, which will unreference any custom fonts stored inside the instance
+  jswrap_graphics_setFontSizeX(parent, 1+JSGRAPHICS_FONTSIZE_4X6, false);
+  // properly reset state
+  graphicsStructResetState(&gfx);
+  graphicsSetVar(&gfx); // gfx data changed because modified area
+  return jsvLockAgain(parent);
+}
+
+/*JSON{
+  "type" : "method",
+  "class" : "Graphics",
   "name" : "clear",
   "generate" : "jswrap_graphics_clear",
   "params" : [
-    ["reset","bool","If `true`, resets the state of Graphics to the default (eg. Color, Font, etc)"]
+    ["reset","bool","If `true`, resets the state of Graphics to the default (eg. Color, Font, etc) as if calling `Graphics.reset`"]
   ],
   "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
   "return_object" : "Graphics"
@@ -452,12 +463,14 @@ int jswrap_graphics_getWidthOrHeight(JsVar *parent, bool height) {
 Clear the LCD with the Background Color
 */
 JsVar *jswrap_graphics_clear(JsVar *parent, bool resetState) {
+  if (resetState) jsvUnLock(jswrap_graphics_reset(parent));
   JsGraphics gfx; if (!graphicsGetFromVar(&gfx, parent)) return 0;
-  if (resetState) graphicsStructResetState(&gfx);
   graphicsClear(&gfx);
   graphicsSetVar(&gfx); // gfx data changed because modified area
   return jsvLockAgain(parent);
 }
+
+
 
 /*JSON{
   "type" : "method",
@@ -645,7 +658,7 @@ int jswrap_graphics_getPixel(JsVar *parent, int x, int y) {
   "params" : [
     ["x","int32","The left"],
     ["y","int32","The top"],
-    ["col","JsVar","The color"]
+    ["col","JsVar","The color (if `undefined`, the foreground color is useD)"]
   ],
   "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
   "return_object" : "Graphics"
@@ -656,7 +669,7 @@ JsVar *jswrap_graphics_setPixel(JsVar *parent, int x, int y, JsVar *color) {
   JsGraphics gfx; if (!graphicsGetFromVar(&gfx, parent)) return 0;
   unsigned int col = gfx.data.fgColor;
   if (!jsvIsUndefined(color))
-    col = (unsigned int)jsvGetInteger(color);
+    col = jswrap_graphics_toColor(parent,color,0,0);
   graphicsSetPixel(&gfx, x, y, col);
   gfx.data.cursorX = (short)x;
   gfx.data.cursorY = (short)y;
@@ -667,53 +680,29 @@ JsVar *jswrap_graphics_setPixel(JsVar *parent, int x, int y, JsVar *color) {
 /*JSON{
   "type" : "method",
   "class" : "Graphics",
-  "name" : "setColor",
-  "generate_full" : "jswrap_graphics_setColorX(parent, r,g,b, true)",
+  "name" : "toColor",
+  "ifndef" : "SAVE_ON_FLASH",
+  "generate" : "jswrap_graphics_toColor",
   "params" : [
     ["r","JsVar","Red (between 0 and 1) **OR** an integer representing the color in the current bit depth and color order **OR** a hexidecimal color string of the form `'#012345'`"],
     ["g","JsVar","Green (between 0 and 1)"],
     ["b","JsVar","Blue (between 0 and 1)"]
   ],
-  "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
-  "return_object" : "Graphics"
+  "return" : ["int","The color index represented by the arguments"]
 }
-Set the color to use for subsequent drawing operations.
+Work out the color value to be used in the current bit depth based on the arguments.
 
-If just `r` is specified as an integer, the numeric value will be written directly into a pixel. eg. On a 24 bit `Graphics` instance you set bright blue with either `g.setColor(0,0,1)` or `g.setColor(0x0000FF)`.
+This is used internally by setColor and setBgColor
 
-The mapping is as follows:
-
-* 32 bit: `r,g,b` => `0xFFrrggbb`
-* 24 bit: `r,g,b` => `0xrrggbb`
-* 16 bit: `r,g,b` => `0brrrrrggggggbbbbb` (RGB565)
-* Other bpp: `r,g,b` => white if `r+g+b > 50%`, otherwise black (use `r` on its own as an integer)
-
-If you specified `color_order` when creating the `Graphics` instance, `r`,`g` and `b` will be swapped as you specified.
-
-**Note:** On devices with low flash memory, `r` **must** be an integer representing the color in the current bit depth. It cannot
-be a floating point value, and `g` and `b` are ignored.
+```
+// 1 bit
+g.toColor(1,1,1) => 1
+// 16 bit
+g.toColor(1,0,0) => 0xF800
+```
 */
-/*JSON{
-  "type" : "method",
-  "class" : "Graphics",
-  "name" : "setBgColor",
-  "generate_full" : "jswrap_graphics_setColorX(parent, r,g,b, false)",
-  "params" : [
-    ["r","JsVar","Red (between 0 and 1) **OR** an integer representing the color in the current bit depth and color order **OR** a hexidecimal color string of the form `'#012345'`"],
-    ["g","JsVar","Green (between 0 and 1)"],
-    ["b","JsVar","Blue (between 0 and 1)"]
-  ],
-  "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
-  "return_object" : "Graphics"
-}
-Set the background color to use for subsequent drawing operations. 
 
-See `Graphics.setColor` for more information on the mapping of `r`, `g`, and `b` to pixel values.
-
-**Note:** On devices with low flash memory, `r` **must** be an integer representing the color in the current bit depth. It cannot
-be a floating point value, and `g` and `b` are ignored.
-*/
-JsVar *jswrap_graphics_setColorX(JsVar *parent, JsVar *r, JsVar *g, JsVar *b, bool isForeground) {
+unsigned int jswrap_graphics_toColor(JsVar *parent, JsVar *r, JsVar *g, JsVar *b) {
   JsGraphics gfx; if (!graphicsGetFromVar(&gfx, parent)) return 0;
   unsigned int color = 0;
 #ifdef SAVE_ON_FLASH
@@ -785,7 +774,7 @@ JsVar *jswrap_graphics_setColorX(JsVar *parent, JsVar *r, JsVar *g, JsVar *b, bo
       color = 0xFF000000 | (unsigned int)(bi | (gi<<8) | (ri<<16));
     } else if (gfx.data.bpp==24) {
       color = (unsigned int)(bi | (gi<<8) | (ri<<16));
-#if defined(GRAPHICS_PALETTED_IMAGES) && LCD_BPP==4
+#if defined(GRAPHICS_PALETTED_IMAGES)
     } else if (gfx.data.bpp==4) {
       // LCD is paletted - look up in our palette to find the best match
       int d = 0x7FFFFFFF;
@@ -807,6 +796,28 @@ JsVar *jswrap_graphics_setColorX(JsVar *parent, JsVar *r, JsVar *g, JsVar *b, bo
           color=i;
         }
       }
+    } else if (gfx.data.bpp==8) {
+      // LCD is paletted - look up in our palette to find the best match
+      // TODO: For web palette we should be able to cheat without searching...
+      int d = 0x7FFFFFFF;
+      color = 0;
+      for (int i=0;i<255;i++) {
+        int p = PALETTE_8BIT[i];
+        int pr = (p>>8)&0xF8;
+        int pg = (p>>3)&0xFC;
+        int pb = (p<<3)&0xF8;
+        pr |= pr>>5;
+        pg |= pb>>6;
+        pb |= pb>>5;
+        int dr = pr-ri;
+        int dg = pg-gi;
+        int db = pb-bi;
+        int dd = dr*dr+dg*dg+db*db;
+        if (dd<d) {
+          d=dd;
+          color=(unsigned int)i;
+        }
+      }
 #endif
     } else
       color = (unsigned int)(((ri+gi+bi)>=384) ? 0xFFFFFFFF : 0);
@@ -815,6 +826,62 @@ JsVar *jswrap_graphics_setColorX(JsVar *parent, JsVar *r, JsVar *g, JsVar *b, bo
     // just rgb
     color = (unsigned int)jsvGetInteger(r);
   }
+  return color;
+}
+
+/*JSON{
+  "type" : "method",
+  "class" : "Graphics",
+  "name" : "setColor",
+  "generate_full" : "jswrap_graphics_setColorX(parent, r,g,b, true)",
+  "params" : [
+    ["r","JsVar","Red (between 0 and 1) **OR** an integer representing the color in the current bit depth and color order **OR** a hexidecimal color string of the form `'#012345'`"],
+    ["g","JsVar","Green (between 0 and 1)"],
+    ["b","JsVar","Blue (between 0 and 1)"]
+  ],
+  "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
+  "return_object" : "Graphics"
+}
+Set the color to use for subsequent drawing operations.
+
+If just `r` is specified as an integer, the numeric value will be written directly into a pixel. eg. On a 24 bit `Graphics` instance you set bright blue with either `g.setColor(0,0,1)` or `g.setColor(0x0000FF)`.
+
+The mapping is as follows:
+
+* 32 bit: `r,g,b` => `0xFFrrggbb`
+* 24 bit: `r,g,b` => `0xrrggbb`
+* 16 bit: `r,g,b` => `0brrrrrggggggbbbbb` (RGB565)
+* Other bpp: `r,g,b` => white if `r+g+b > 50%`, otherwise black (use `r` on its own as an integer)
+
+If you specified `color_order` when creating the `Graphics` instance, `r`,`g` and `b` will be swapped as you specified.
+
+**Note:** On devices with low flash memory, `r` **must** be an integer representing the color in the current bit depth. It cannot
+be a floating point value, and `g` and `b` are ignored.
+*/
+/*JSON{
+  "type" : "method",
+  "class" : "Graphics",
+  "name" : "setBgColor",
+  "generate_full" : "jswrap_graphics_setColorX(parent, r,g,b, false)",
+  "params" : [
+    ["r","JsVar","Red (between 0 and 1) **OR** an integer representing the color in the current bit depth and color order **OR** a hexidecimal color string of the form `'#012345'`"],
+    ["g","JsVar","Green (between 0 and 1)"],
+    ["b","JsVar","Blue (between 0 and 1)"]
+  ],
+  "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
+  "return_object" : "Graphics"
+}
+Set the background color to use for subsequent drawing operations.
+
+See `Graphics.setColor` for more information on the mapping of `r`, `g`, and `b` to pixel values.
+
+**Note:** On devices with low flash memory, `r` **must** be an integer representing the color in the current bit depth. It cannot
+be a floating point value, and `g` and `b` are ignored.
+*/
+
+JsVar *jswrap_graphics_setColorX(JsVar *parent, JsVar *r, JsVar *g, JsVar *b, bool isForeground) {
+  JsGraphics gfx; if (!graphicsGetFromVar(&gfx, parent)) return 0;
+  unsigned int color = jswrap_graphics_toColor(parent,r,g,b);
   if (isForeground)
     gfx.data.fgColor = color;
   else
@@ -845,6 +912,44 @@ JsVarInt jswrap_graphics_getColorX(JsVar *parent, bool isForeground) {
   JsGraphics gfx; if (!graphicsGetFromVar(&gfx, parent)) return 0;
   return (JsVarInt)((isForeground ? gfx.data.fgColor : gfx.data.bgColor) & ((1UL<<gfx.data.bpp)-1));
 }
+
+
+/*JSON{
+  "type" : "method",
+  "class" : "Graphics",
+  "name" : "setClipRect",
+  "ifndef" : "SAVE_ON_FLASH",
+  "generate" : "jswrap_graphics_setClipRect",
+  "params" : [
+    ["x1","int","Top left X coordinate"],
+    ["y1","int","Top left Y coordinate"],
+    ["x2","int","Bottom right X coordinate"],
+    ["y2","int","Bottom right Y coordinate"]
+  ],
+  "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
+  "return_object" : "Graphics"
+}
+This sets the 'clip rect' that subsequent drawing operations are clipped to
+sit between.
+
+These values are inclusive - eg `g.setClipRect(1,0,5,0)` will ensure that only
+pixel rows 1,2,3,4,5 are touched on column 0.
+
+**Note:** For maximum flexibility, the values here are not range checked. For normal
+use, unsure X and Y are between 0 and `getWidth`/`getHeight`.
+*/
+JsVar *jswrap_graphics_setClipRect(JsVar *parent, int x1, int y1, int x2, int y2) {
+  JsGraphics gfx; if (!graphicsGetFromVar(&gfx, parent)) return 0;
+#ifndef SAVE_ON_FLASH
+  gfx.data.clipRect.x1 = (unsigned short)x1;
+  gfx.data.clipRect.y1 = (unsigned short)y1;
+  gfx.data.clipRect.x2 = (unsigned short)x2;
+  gfx.data.clipRect.y2 = (unsigned short)y2;
+  graphicsSetVar(&gfx);
+#endif
+  return jsvLockAgain(parent);
+}
+
 
 /*JSON{
   "type" : "method",
@@ -980,8 +1085,8 @@ JsVar *jswrap_graphics_setFontAlign(JsVar *parent, int x, int y, int r) {
   "ifndef" : "SAVE_ON_FLASH",
   "generate" : "jswrap_graphics_setFont",
   "params" : [
-    ["name","JsVar","The name of the current font"],
-    ["size","int","The size of the font"]
+    ["name","JsVar","The name of the font to use (if undefined, the standard 4x6 font will be used)"],
+    ["size","int","The size of the font (or undefined)"]
   ],
   "return" : ["JsVar","The instance of Graphics this was called on, to allow call chaining"],
   "return_object" : "Graphics"
@@ -993,17 +1098,18 @@ For bitmap fonts you can also specify a size multiplier, for example `g.setFont(
 JsVar *jswrap_graphics_setFont(JsVar *parent, JsVar *name, int size) {
 #ifndef SAVE_ON_FLASH
   if (!jsvIsString(name)) return 0;
-  JsGraphics gfx; if (!graphicsGetFromVar(&gfx, parent)) return 0;
   unsigned short sz = 0xFFFF;
+  bool isVector = false;
 #ifndef NO_VECTOR_FONT
   if (jsvIsStringEqualOrStartsWith(name, "Vector", true)) {
     sz = (unsigned short)jsvGetIntegerAndUnLock(jsvNewFromStringVar(name, 6, JSVAPPENDSTRINGVAR_MAXLENGTH));
     if (size>0) sz = (unsigned short)size;
+    isVector = true;
   }
 #endif
-  if (size<=0) size=1;
+  if (size<1) size=1;
   if (size>JSGRAPHICS_FONTSIZE_SCALE_MASK) size=JSGRAPHICS_FONTSIZE_SCALE_MASK;
-  if (jsvIsStringEqual(name, "4x6"))
+  if (jsvIsUndefined(name) || jsvIsStringEqual(name, "4x6"))
     sz = (unsigned short)(size + JSGRAPHICS_FONTSIZE_4X6);
 #ifdef USE_FONT_6X8
   if (jsvIsStringEqual(name, "6x8"))
@@ -1013,9 +1119,7 @@ JsVar *jswrap_graphics_setFont(JsVar *parent, JsVar *name, int size) {
   if (sz==0xFFFF) {
     jsExceptionHere(JSET_ERROR, "Unknown font %j", name);
   }
-  gfx.data.fontSize=sz;
-  graphicsSetVar(&gfx);
-  return jsvLockAgain(parent);
+  jswrap_graphics_setFontSizeX(parent, sz, isVector);
 #else
   return 0;
 #endif
@@ -1192,8 +1296,10 @@ JsVar *jswrap_graphics_drawString(JsVar *parent, JsVar *var, int x, int y, bool 
     y -= customHeight * (gfx.data.fontAlignY+1)/2;
 #endif
 
-  int maxX = (gfx.data.flags & JSGRAPHICSFLAGS_SWAP_XY) ? gfx.data.height : gfx.data.width;
-  int maxY = (gfx.data.flags & JSGRAPHICSFLAGS_SWAP_XY) ? gfx.data.width : gfx.data.height;
+  int minX = (gfx.data.flags & JSGRAPHICSFLAGS_SWAP_XY) ? gfx.data.clipRect.y1 : gfx.data.clipRect.x1;
+  int minY = (gfx.data.flags & JSGRAPHICSFLAGS_SWAP_XY) ? gfx.data.clipRect.x1 : gfx.data.clipRect.y1;
+  int maxX = (gfx.data.flags & JSGRAPHICSFLAGS_SWAP_XY) ? gfx.data.clipRect.y2 : gfx.data.clipRect.x2;
+  int maxY = (gfx.data.flags & JSGRAPHICSFLAGS_SWAP_XY) ? gfx.data.clipRect.x2 : gfx.data.clipRect.y2;
   int startx = x;
   JsVar *str = jsvAsString(var);
   JsvStringIterator it;
@@ -1209,17 +1315,17 @@ JsVar *jswrap_graphics_drawString(JsVar *parent, JsVar *var, int x, int y, bool 
     if (font == JSGRAPHICS_FONTSIZE_VECTOR) {
 #ifndef NO_VECTOR_FONT
       int w = (int)graphicsVectorCharWidth(&gfx, gfx.data.fontSize, ch);
-      if (x>-w && x<maxX  && y>-gfx.data.fontSize && y<maxY)
+      if (x>minX-w && x<maxX  && y>minY-gfx.data.fontSize && y<maxY)
         graphicsFillVectorChar(&gfx, x, y, gfx.data.fontSize, ch);
       x+=w;
 #endif
     } else if (font == JSGRAPHICS_FONTSIZE_4X6) {
-      if (x>-4 && x<maxX && y>-6 && y<maxY)
+      if (x>minX-4 && x<maxX && y>minY-6 && y<maxY)
         graphicsDrawChar4x6(&gfx, x, y, ch, scale, solidBackground);
       x+=4*scale;
 #ifdef USE_FONT_6X8
     } else if (font == JSGRAPHICS_FONTSIZE_6X8) {
-      if (x>-6 && x<maxX && y>-8 && y<maxY)
+      if (x>minX-6 && x<maxX && y>minY-8 && y<maxY)
         graphicsDrawChar6x8(&gfx, x, y, ch, scale, solidBackground);
       x+=6*scale;
 #endif
@@ -1241,7 +1347,7 @@ JsVar *jswrap_graphics_drawString(JsVar *parent, JsVar *var, int x, int y, bool 
         width = (int)jsvGetInteger(customWidth);
         bmpOffset = width*(ch-customFirstChar);
       }
-      if (ch>=customFirstChar && (x>-width) && (x<maxX) && (y>-customHeight) && y<maxY) {
+      if (ch>=customFirstChar && (x>minX-width) && (x<maxX) && (y>minY-customHeight) && y<maxY) {
         int ch = customHeight/scale;
         bmpOffset *= ch;
         // now render character
@@ -1574,14 +1680,12 @@ Draw an image at the specified position.
 * Otherwise color data will be copied as-is. Bitmaps are rendered MSB-first
 
 If `options` is supplied, `drawImage` will allow images to be rendered at any scale or angle. If `options.rotate` is set it will
-center images at `x,y` unless centerx/centery are specified. `options` must be an object of the form:
+center images at `x,y`. `options` must be an object of the form:
 
 ```
 {
   rotate : float, // the amount to rotate the image in radians (default 0)
   scale : float, // the amount to scale the image in radians (default 1)
-  centerx : int, // the center to rotate around (default image width/2)
-  centery : int  // the center to rotate around (default image height/2)
 }
 ```
 */
@@ -1690,6 +1794,9 @@ JsVar *jswrap_graphics_drawImage(JsVar *parent, JsVar *image, int xPos, int yPos
     } else if (gfx.data.bpp==16 && imageBpp==8) { // palette is 16 bits, so don't use it for other things
       palettePtr = PALETTE_8BIT;
       paletteMask = 255;
+    } else if (gfx.data.bpp==8 && imageBpp==4) {
+      palettePtr = PALETTE_4BIT_TO_8BIT;
+      paletteMask = 15;
   #endif
     }
   }
@@ -1736,7 +1843,8 @@ JsVar *jswrap_graphics_drawImage(JsVar *parent, JsVar *image, int xPos, int yPos
           // Try and write pixel!
           if (imageTransparentCol!=col) {
             if (palettePtr) col = palettePtr[col&paletteMask];
-            if (xp>=0 && xp<gfx.data.width && yp>=0 && yp<gfx.data.height)
+            if (xp>=gfx.data.clipRect.x1 && xp<=gfx.data.clipRect.x2 &&
+                yp>=gfx.data.clipRect.y1 && yp<=gfx.data.clipRect.y2)
               gfx.setPixel(&gfx, xp, yp, col);
           }
           xp++;
@@ -1745,10 +1853,10 @@ JsVar *jswrap_graphics_drawImage(JsVar *parent, JsVar *image, int xPos, int yPos
       }
       // update modified area since we went direct
       int x1=xPos, y1=yPos, x2=xPos+imageWidth, y2=yPos+imageHeight;
-      if (x1<0) x1=0;
-      if (y1<0) y1=0;
-      if (x2>=gfx.data.width) x2 = gfx.data.width - 1;
-      if (y2>=gfx.data.height) y2 = gfx.data.height - 1;
+      if (x1<gfx.data.clipRect.x1) x1 = gfx.data.clipRect.x1;
+      if (y1<gfx.data.clipRect.y1) y1 = gfx.data.clipRect.y1;
+      if (x2>gfx.data.clipRect.x2) x2 = gfx.data.clipRect.x2;
+      if (y2>gfx.data.clipRect.y2) y2 = gfx.data.clipRect.y2;
       if (x1 < gfx.data.modMinX) gfx.data.modMinX=(short)x1;
       if (x2 > gfx.data.modMaxX) gfx.data.modMaxX=(short)x2;
       if (y1 < gfx.data.modMinY) gfx.data.modMinY=(short)y1;
@@ -1782,7 +1890,7 @@ JsVar *jswrap_graphics_drawImage(JsVar *parent, JsVar *image, int xPos, int yPos
 #else
     // fancy rotation/scaling
     int imageStride = (imageWidth*imageBpp + 7)>>3;
-    // rotate, scale, centerx, centery
+    // rotate, scale
     double scale = jsvGetFloatAndUnLock(jsvObjectGetChild(options,"scale",0));
     if (!isfinite(scale) || scale<=0) scale=1;
     double rotate = jsvGetFloatAndUnLock(jsvObjectGetChild(options,"rotate",0));
@@ -1827,10 +1935,10 @@ JsVar *jswrap_graphics_drawImage(JsVar *parent, JsVar *image, int xPos, int yPos
             unsigned int col = (colData>>(bits-imageBpp))&imageBitMask;
             bits -= imageBpp;
             // Try and write pixel!
-            if (imageTransparentCol!=col && yp>=0 && yp<gfx.data.height) {
+            if (imageTransparentCol!=col && yp>=gfx.data.clipRect.y1 && yp<=gfx.data.clipRect.y2) {
               if (palettePtr) col = palettePtr[col&paletteMask];
               for (int ix=0;ix<s;ix++) {
-                if (xp>=0 && xp<gfx.data.width)
+                if (xp>=gfx.data.clipRect.x1 && xp<=gfx.data.clipRect.x2)
                   gfx.setPixel(&gfx, xp, yp, col);
                 xp++;
               }
@@ -1841,10 +1949,10 @@ JsVar *jswrap_graphics_drawImage(JsVar *parent, JsVar *image, int xPos, int yPos
       }
       // update modified area since we went direct
       int x1=xPos, y1=yPos, x2=xPos+s*imageWidth, y2=yPos+s*imageHeight;
-      if (x1<0) x1=0;
-      if (y1<0) y1=0;
-      if (x2>=gfx.data.width) x2 = gfx.data.width - 1;
-      if (y2>=gfx.data.height) y2 = gfx.data.height - 1;
+      if (x1<gfx.data.clipRect.x1) x1 = gfx.data.clipRect.x1;
+      if (y1<gfx.data.clipRect.y1) y1 = gfx.data.clipRect.y1;
+      if (x2>gfx.data.clipRect.x2) x2 = gfx.data.clipRect.x2;
+      if (y2>gfx.data.clipRect.y2) y2 = gfx.data.clipRect.y2;
       if (x1 < gfx.data.modMinX) gfx.data.modMinX=(short)x1;
       if (x2 > gfx.data.modMaxX) gfx.data.modMaxX=(short)x2;
       if (y1 < gfx.data.modMinY) gfx.data.modMinY=(short)y1;
@@ -1855,11 +1963,6 @@ JsVar *jswrap_graphics_drawImage(JsVar *parent, JsVar *image, int xPos, int yPos
 #endif
       int centerx = imageWidth*128;
       int centery = imageHeight*128;
-      JsVar *v;
-      v = jsvObjectGetChild(options,"centerx",0);
-      if (v) centerx = jsvGetIntegerAndUnLock(v)*256;
-      v = jsvObjectGetChild(options,"centery",0);
-      if (v) centery = jsvGetIntegerAndUnLock(v)*256;
       // step values for blitting rotated image
       double vcos = cos(rotate);
       double vsin = sin(rotate);

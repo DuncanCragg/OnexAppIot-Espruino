@@ -49,6 +49,26 @@ E.on('init', function() {
 rather than replacing the last one. This allows you to write modular code -
 something that was not possible with `onInit`.
  */
+/*JSON{
+  "type" : "event",
+  "class" : "E",
+  "name" : "kill"
+}
+This event is called just before the device shuts down for commands such as
+`reset()`, `load()`, `save()`, `E.reboot()` or `Bangle.off()`
+
+For example to write `"Bye!"` just before shutting down use:
+
+```
+E.on('kill', function() {
+  console.log("Bye!");
+});
+```
+
+**NOTE:** This event is not called when the device is 'hard reset' - for
+example by removing power, hitting an actual reset button, or via
+a Watchdog timer reset.
+*/
 
 /*JSON{
   "type" : "event",
@@ -1488,6 +1508,34 @@ signal.
   "type" : "staticmethod",
   "ifndef" : "SAVE_ON_FLASH",
   "class" : "E",
+  "name" : "CRC32",
+  "generate" : "jswrap_espruino_CRC32",
+  "params" : [
+    ["data","JsVar","Iterable data to perform CRC32 on (each element treated as a byte)"]
+  ],
+  "return" : ["JsVar","The CRC of the supplied data"]
+}
+Perform a standard 32 bit CRC (Cyclic redundancy check) on the supplied data (one byte at a time)
+and return the result as an unsigned integer.
+ */
+JsVar *jswrap_espruino_CRC32(JsVar *data) {
+  JsvIterator it;
+  jsvIteratorNew(&it, data, JSIF_EVERY_ARRAY_ELEMENT);
+  uint32_t crc = 0xFFFFFFFF;
+  while (jsvIteratorHasElement(&it)) {
+    crc ^= (uint8_t)jsvIteratorGetIntegerValue(&it);
+    for (int t=0;t<8;t++)
+      crc = (crc>>1) ^ (0xEDB88320 & -(crc & 1));
+    jsvIteratorNext(&it);
+  }
+  jsvIteratorFree(&it);
+  return jsvNewFromLongInteger(~crc);
+}
+
+/*JSON{
+  "type" : "staticmethod",
+  "ifndef" : "SAVE_ON_FLASH",
+  "class" : "E",
   "name" : "HSBtoRGB",
   "generate" : "jswrap_espruino_HSBtoRGB",
   "params" : [
@@ -1719,6 +1767,11 @@ reset of Espruino (resetting the interpreter and pin states, but not
 all the hardware)
 */
 void jswrap_espruino_reboot() {
+  // ensure `E.on('kill',...` gets called and everything is torn down correctly
+  jsiKill();
+  jsvKill();
+  jshKill();
+
   jshReboot();
 }
 

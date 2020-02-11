@@ -17,16 +17,20 @@ void jswrap_banglejs_lcdWr(JsVarInt cmd, JsVar *data);
 void jswrap_banglejs_setLCDPower(bool isOn);
 void jswrap_banglejs_setLCDBrightness(JsVarFloat v);
 void jswrap_banglejs_setLCDMode(JsVar *mode);
+JsVar *jswrap_banglejs_getLCDMode();
+void jswrap_banglejs_setLCDOffset(int y);
 void jswrap_banglejs_setLCDTimeout(JsVarFloat timeout);
 void jswrap_banglejs_setPollInterval(JsVarFloat interval);
 void jswrap_banglejs_setOptions(JsVar *options);
-bool jswrap_banglejs_isLCDOn();
-bool jswrap_banglejs_isCharging();
+int jswrap_banglejs_isLCDOn();
+int jswrap_banglejs_isCharging();
 JsVarInt jswrap_banglejs_getBattery();
 
 void jswrap_banglejs_setHRMPower(bool isOn);
 void jswrap_banglejs_setGPSPower(bool isOn);
 void jswrap_banglejs_setCompassPower(bool isOn);
+JsVar *jswrap_banglejs_getCompass();
+JsVar *jswrap_banglejs_getAccel();
 
 JsVar *jswrap_banglejs_dbg();
 void jswrap_banglejs_accelWr(JsVarInt reg, JsVarInt data);

@@ -23,7 +23,6 @@
 #include "jspin.h"
 #include "jstimer.h"
 #include "jswrap_promise.h"
-#include "jswrap_bluetooth.h"
 #include "jswrap_date.h"
 #include "jswrap_math.h"
 #include "jswrap_storage.h"
@@ -31,14 +30,16 @@
 #include "jswrap_arraybuffer.h"
 #include "jswrap_heatshrink.h"
 #include "jsflash.h"
+#ifndef EMSCRIPTEN
+#include "jswrap_bluetooth.h"
 #include "nrf_gpio.h"
 #include "nrf_delay.h"
 #include "nrf_soc.h"
 #include "nrf_saadc.h"
 #include "nrf5x_utils.h"
-#include "jsflash.h" // for jsfRemoveCodeFromFlash
 #include "bluetooth.h" // for self-test
 #include "jsi2c.h" // accelerometer/etc
+#endif
 
 #include "jswrap_graphics.h"
 #include "lcd_st7789_8bit.h"
@@ -73,13 +74,15 @@ The Bangle.js's vibration motor.
   "params" : [["xyz","JsVar",""]],
   "ifdef" : "BANGLEJS"
 }
-Accelerometer data available with `{x,y,z,diff,mag}` object as a parameter
+Accelerometer data available with `{x,y,z,diff,mag}` object as a parameter.
 
 * `x` is X axis (left-right) in `g`
 * `y` is Y axis (up-down) in `g`
 * `z` is Z axis (in-out) in `g`
 * `diff` is difference between this and the last reading in `g`
 * `mag` is the magnitude of the acceleration in `g`
+
+You can also retrieve the most recent reading with `Bangle.getAccel()`.
  */
 /*JSON{
   "type" : "event",
@@ -102,11 +105,21 @@ Has the watch been moved so that it is face-up, or not face up?
 /*JSON{
   "type" : "event",
   "class" : "Bangle",
-  "name" : "charging",
-  "params" : [["up","bool","`true` if charging"]],
+  "name" : "twist",
   "ifdef" : "BANGLEJS"
 }
-Has the watch been moved so that it is face-up, or not face up?
+This event happens when the watch has been twisted around it's axis - for instance as if it was rotated so someone could look at the time.
+
+To tweak when this happens, see the `twist*` options in `Bangle.setOptions()`
+ */
+/*JSON{
+  "type" : "event",
+  "class" : "Bangle",
+  "name" : "charging",
+  "params" : [["charging","bool","`true` if charging"]],
+  "ifdef" : "BANGLEJS"
+}
+Is the battery charging or not?
  */
 /*JSON{
   "type" : "event",
@@ -123,6 +136,8 @@ Magnetometer/Compass data available with `{x,y,z,dx,dy,dz,heading}` object as a 
 
 To get this event you must turn the compass on
 with `Bangle.setCompassPower(1)`.
+
+You can also retrieve the most recent reading with `Bangle.getCompass()`.
  */
 /*JSON{
   "type" : "event",
@@ -151,7 +166,7 @@ GPS data, as an object. Contains:
   "alt": number,      // altitude in M
   "speed": number,    // Speed in kph
   "course": number,   // Course in degrees
-  "time": Date,       // Current Time
+  "time": Date,       // Current Time (or undefined if not known)
   "satellites": 7,    // Number of satellites
   "fix": 1            // NMEA Fix state - 0 is no fix
 }
@@ -295,6 +310,8 @@ volatile uint16_t flipTimer; // in ms
 volatile uint16_t btn1Timer; // in ms
 /// Is LCD power automatic? If true this is the number of ms for the timeout, if false it's 0
 int lcdPowerTimeout; // in ms
+/// If a button was pressed to wake the LCD up, which one was it?
+char lcdWakeButton;
 /// Is the LCD on?
 bool lcdPowerOn;
 /// LCD Brightness - 255=full
@@ -321,6 +338,8 @@ volatile uint8_t accGestureRecordedCount;
 volatile uint8_t accIdleCount;
 /// data on how watch was tapped
 unsigned char tapInfo;
+/// time since watch was last twisted enough past twistThreshold
+volatile uint16_t twistTimer; // in ms
 // Gesture settings
 /// how big a difference before we consider a gesture started?
 int accelGestureStartThresh = 800*800;
@@ -335,13 +354,28 @@ int accelGestureMinLength = 10;
 int stepCounterThresholdLow = (8192-80)*(8192-80);
 /// How high must acceleration magnitude squared get before we consider it a step?
 int stepCounterThresholdHigh = (8192+80)*(8192+80);
+/// How much acceleration to register a twist of the watch strap?
+int twistThreshold = 800;
+/// Maximum acceleration in Y to trigger a twist (low Y means watch is facing the right way up)
+int twistMaxY = -800;
+/// How little time (in ms) must a twist take from low->high acceleration?
+int twistTimeout = 1000;
+
 /// Current steps since reset
 uint32_t stepCounter;
 /// has acceleration counter passed stepCounterThresholdLow?
 bool stepWasLow;
 /// What state was the touchscreen last in
-uint8_t touchLastState;
-uint8_t touchLastState2;
+typedef enum {
+  TS_NONE = 0,
+  TS_LEFT = 1,
+  TS_RIGHT = 2,
+  TS_BOTH = 3,
+  TS_SWIPED = 4
+} TouchState;
+TouchState touchLastState; /// What happened in the last event?
+TouchState touchLastState2; /// What happened in the event before last?
+TouchState touchStatus; ///< What has happened *while the current touch is in progress*
 
 int8_t hrmHistory[HRM_HISTORY_LEN];
 volatile uint8_t hrmHistoryIdx;
@@ -350,6 +384,21 @@ volatile uint8_t hrmHistoryIdx;
 JsVar *promiseBeep;
 /// Promise when buzz is finished
 JsVar *promiseBuzz;
+
+typedef enum {
+  JSBF_NONE,
+  JSBF_WAKEON_FACEUP = 1,
+  JSBF_WAKEON_BTN1   = 2,
+  JSBF_WAKEON_BTN2   = 4,
+  JSBF_WAKEON_BTN3   = 8,
+  JSBF_WAKEON_TOUCH  = 16,
+  JSBF_WAKEON_TWIST  = 32,
+
+  JSBF_DEFAULT =
+      JSBF_WAKEON_TWIST|
+      JSBF_WAKEON_BTN1|JSBF_WAKEON_BTN2|JSBF_WAKEON_BTN3
+} JsBangleFlags;
+volatile JsBangleFlags bangleFlags;
 
 typedef enum {
   JSBT_NONE,
@@ -371,6 +420,7 @@ typedef enum {
   JSBT_TOUCH_RIGHT = 16384, ///< touch rhs of touchscreen
   JSBT_TOUCH_MASK = JSBT_TOUCH_LEFT | JSBT_TOUCH_RIGHT,
   JSBT_HRM_DATA = 32768, ///< Heart rate data is ready for analysis
+  JSBT_TWIST_EVENT = 65536, ///< Watch was twisted
 } JsBangleTasks;
 JsBangleTasks bangleTasks;
 
@@ -381,15 +431,23 @@ void lcd_flip(JsVar *parent) {
     jswrap_banglejs_setLCDPower(1);
   }
   flipTimer = 0;
-  lcdST7789_flip();
+
+  JsVar *graphics = jsvObjectGetChild(execInfo.hiddenRoot, JS_GRAPHICS_VAR, 0);
+  if (!graphics) return;
+  JsGraphics gfx;
+  if (!graphicsGetFromVar(&gfx, graphics)) return;
+  lcdST7789_flip(&gfx);
+  graphicsSetVar(&gfx);
+  jsvUnLock(graphics);
 }
 
 char clipi8(int x) {
   if (x<-128) return -128;
   if (x>127) return 127;
-  return x;
+  return (char)x;
 }
 
+#ifndef EMSCRIPTEN
 /* Scan peripherals for any data that's needed
  * Also, holding down both buttons will reboot */
 void peripheralPollHandler() {
@@ -495,6 +553,26 @@ void peripheralPollHandler() {
       stepCounter++;
       bangleTasks |= JSBT_STEP_EVENT;
     }
+    // check for twist action
+    if (twistTimer < TIMER_MAX)
+      twistTimer += pollInterval;
+    int tdy = dy;
+    int tthresh = twistThreshold;
+    if (tthresh<0) {
+      tthresh = -tthresh;
+      tdy = -tdy;
+    }
+    if (tdy>tthresh) twistTimer=0;
+    if (tdy<-tthresh && twistTimer<twistTimeout && acc.y<twistMaxY) {
+      twistTimer = TIMER_MAX; // ensure we don't trigger again until tdy>tthresh
+      bangleTasks |= JSBT_TWIST_EVENT;
+      if (bangleFlags&JSBF_WAKEON_TWIST) {
+        flipTimer = 0;
+        if (!lcdPowerOn)
+          bangleTasks |= JSBT_LCD_ON;
+      }
+    }
+
     // checking for gestures
     if (accGestureCount==0) { // no gesture yet
       // if movement is eniugh, start one
@@ -563,48 +641,73 @@ void backlightOffHandler() {
   if (i2cBusy) return;
   jswrap_banglejs_ioWr(IOEXP_LCD_BACKLIGHT, 1); // backlight off
 }
-
-
+#endif // !EMSCRIPTEN
 
 void btnHandlerCommon(int button, bool state, IOEventFlags flags) {
   // wake up
   if (lcdPowerTimeout) {
-    if (button<=3) {
+    if (((bangleFlags&JSBF_WAKEON_BTN1)&&(button==1)) ||
+        ((bangleFlags&JSBF_WAKEON_BTN2)&&(button==2)) ||
+        ((bangleFlags&JSBF_WAKEON_BTN3)&&(button==3))){
       // if a 'hard' button, turn LCD on
       flipTimer = 0;
-      if (!lcdPowerOn) {
+      if (!lcdPowerOn && state) {
         bangleTasks |= JSBT_LCD_ON;
+        lcdWakeButton = button;
         return; // don't push button event if the LCD is off
       }
     } else {
       // on touchscreen, keep LCD on if it was in previously
       if (lcdPowerOn)
         flipTimer = 0;
+      else // else don't push the event
+        return;
     }
+  }
+  /* This stops the button 'up' event being
+   propagated if the button down was used to wake
+   the LCD up */
+  if (button == lcdWakeButton && !state) {
+    lcdWakeButton = 0;
+    return;
   }
   // Add to the event queue for normal processing for watches
   jshPushIOEvent(flags | (state?EV_EXTI_IS_HIGH:0), jshGetSystemTime());
 }
 
-void btnTouchHandler() {
-  uint8_t state =
-      (jshPinGetValue(BTN4_PININDEX)?1:0) |
-      (jshPinGetValue(BTN5_PININDEX)?2:0);
-
-  if (!touchLastState2 &&
-      touchLastState &&
-      !state) {
-    if (touchLastState==1) bangleTasks |= JSBT_TOUCH_LEFT;
-    if (touchLastState==2) bangleTasks |= JSBT_TOUCH_RIGHT;
+// returns true if handled and shouldn't create a normal watch event
+bool btnTouchHandler() {
+  if (bangleFlags&JSBF_WAKEON_TOUCH) {
+    flipTimer = 0; // ensure LCD doesn't sleep if we're touching it
+    if (!lcdPowerOn) {
+      bangleTasks |= JSBT_LCD_ON;
+      return true; // eat the event
+    }
   }
-  if ((touchLastState==3 && state==1) ||
-      (touchLastState==2 && state==1))
+  TouchState state =
+      (jshPinGetValue(BTN4_PININDEX)?TS_LEFT:0) |
+      (jshPinGetValue(BTN5_PININDEX)?TS_RIGHT:0);
+  touchStatus |= state;
+  if ((touchLastState2==TS_RIGHT && touchLastState==TS_BOTH && state==TS_LEFT) ||
+      (touchLastState==TS_RIGHT && state==1)) {
+    touchStatus |= TS_SWIPED;
     bangleTasks |= JSBT_SWIPE_LEFT;
-  if ((touchLastState==3 && state==2) ||
-      (touchLastState==1 && state==2))
+  }
+  if ((touchLastState2==TS_LEFT && touchLastState==TS_BOTH && state==TS_RIGHT) ||
+      (touchLastState==TS_LEFT && state==TS_RIGHT)) {
+    touchStatus |= TS_SWIPED;
     bangleTasks |= JSBT_SWIPE_RIGHT;
+  }
+  if (!state) {
+    if (touchLastState && !(touchStatus&TS_SWIPED)) {
+      if (touchStatus&TS_LEFT) bangleTasks |= JSBT_TOUCH_LEFT;
+      if (touchStatus&TS_RIGHT) bangleTasks |= JSBT_TOUCH_RIGHT;
+    }
+    touchStatus = TS_NONE;
+  }
   touchLastState2 = touchLastState;
   touchLastState = state;
+  return false;
 }
 void btn1Handler(bool state, IOEventFlags flags) {
   btnHandlerCommon(1,state,flags);
@@ -616,16 +719,17 @@ void btn3Handler(bool state, IOEventFlags flags) {
   btnHandlerCommon(3,state,flags);
 }
 void btn4Handler(bool state, IOEventFlags flags) {
-  btnTouchHandler();
+  if (btnTouchHandler()) return;
   btnHandlerCommon(4,state,flags);
 }
 void btn5Handler(bool state, IOEventFlags flags) {
-  btnTouchHandler();
+  if (btnTouchHandler()) return;
   btnHandlerCommon(5,state,flags);
 }
 
 /// Turn just the backlight on or off (or adjust brightness)
 static void jswrap_banglejs_setLCDPowerBacklight(bool isOn) {
+#ifndef EMSCRIPTEN
   jstStopExecuteFn(backlightOnHandler, 0);
   jstStopExecuteFn(backlightOffHandler, 0);
   if (isOn) { // wake
@@ -644,6 +748,7 @@ static void jswrap_banglejs_setLCDPowerBacklight(bool isOn) {
   } else { // sleep
     jswrap_banglejs_ioWr(IOEXP_LCD_BACKLIGHT, 1); // backlight off
   }
+#endif
 }
 /*JSON{
     "type" : "staticmethod",
@@ -664,9 +769,9 @@ void jswrap_banglejs_setLCDPower(bool isOn) {
   if (isOn) { // wake
     lcdST7789_cmd(0x11, 0, NULL); // SLPOUT
     jshDelayMicroseconds(20);
-    lcdST7789_cmd(0x29, 0, NULL);
+    lcdST7789_cmd(0x29, 0, NULL); // DISPON
   } else { // sleep
-    lcdST7789_cmd(0x28, 0, NULL);
+    lcdST7789_cmd(0x28, 0, NULL); // DISPOFF
     jshDelayMicroseconds(20);
     lcdST7789_cmd(0x10, 0, NULL); // SLPIN
   }
@@ -729,28 +834,134 @@ void jswrap_banglejs_setLCDBrightness(JsVarFloat v) {
     ],
     "ifdef" : "BANGLEJS"
 }
-This function can be used to turn double-buffering on Bangle.js's LCD on or off (the default).
+This function can be used to change the way graphics is handled on Bangle.js.
 
-* `undefined`/`"direct"` (the default) - The drawable area is 240x240, terminal and vertical scrolling will work. Draw calls take effect immediately so there may be flickering unless you're careful.
-* `"doublebuffered" - The drawable area is 240x160, terminal and vertical scrolling will not work. Draw calls only take effect when `g.flip()` is called and there is no flicker.
+Available options for `Bangle.setLCDMode` are:
+
+* `Bangle.setLCDMode()` or `Bangle.setLCDMode("direct")` (the default) - The drawable area is 240x240 16 bit. Unbuffered, so draw calls take effect immediately. Terminal and vertical scrolling work (horizontal scrolling doesn't).
+* `Bangle.setLCDMode("doublebuffered")` - The drawable area is 240x160 16 bit, terminal and scrolling will not work.
+* `Bangle.setLCDMode("120x120")` - The drawable area is 120x120 8 bit, `g.getPixel`, terminal, and full scrolling work.
+* `Bangle.setLCDMode("80x80")` - The drawable area is 80x80 8 bit, `g.getPixel`, terminal, and full scrolling work.
+
+You can also call `Bangle.setLCDMode()` to return to normal, unbuffered `"direct"` mode.
 */
 void jswrap_banglejs_setLCDMode(JsVar *mode) {
   LCDST7789Mode lcdMode = LCDST7789_MODE_UNBUFFERED;
   if (jsvIsUndefined(mode) || jsvIsStringEqual(mode,"direct"))
     lcdMode = LCDST7789_MODE_UNBUFFERED;
+  else if (jsvIsStringEqual(mode,"null"))
+    lcdMode = LCDST7789_MODE_NULL;
   else if (jsvIsStringEqual(mode,"doublebuffered"))
     lcdMode = LCDST7789_MODE_DOUBLEBUFFERED;
+  else if (jsvIsStringEqual(mode,"120x120"))
+    lcdMode = LCDST7789_MODE_BUFFER_120x120;
+  else if (jsvIsStringEqual(mode,"80x80"))
+    lcdMode = LCDST7789_MODE_BUFFER_80x80;
   else
     jsExceptionHere(JSET_ERROR,"Unknown LCD Mode %j",mode);
 
   JsVar *graphics = jsvObjectGetChild(execInfo.hiddenRoot, JS_GRAPHICS_VAR, 0);
   if (!graphics) return;
+  jswrap_graphics_setFont(graphics, NULL, 1); // reset fonts - this will free any memory associated with a custom font
   JsGraphics gfx;
   if (!graphicsGetFromVar(&gfx, graphics)) return;
-  gfx.data.height = (lcdMode==LCDST7789_MODE_DOUBLEBUFFERED) ? 160 : LCD_HEIGHT;
+  // remove the buffer if it was defined
+  jsvObjectSetOrRemoveChild(gfx.graphicsVar, "buffer", 0);
+  unsigned int bufferSize = 0;
+  switch (lcdMode) {
+    case LCDST7789_MODE_NULL:
+    case LCDST7789_MODE_UNBUFFERED:
+      gfx.data.width = LCD_WIDTH;
+      gfx.data.height = LCD_HEIGHT;
+      gfx.data.bpp = 16;
+      break;
+    case LCDST7789_MODE_DOUBLEBUFFERED:
+      gfx.data.width = LCD_WIDTH;
+      gfx.data.height = 160;
+      gfx.data.bpp = 16;
+      break;
+    case LCDST7789_MODE_BUFFER_120x120:
+      gfx.data.width = 120;
+      gfx.data.height = 120;
+      gfx.data.bpp = 8;
+      bufferSize = 120*120;
+      break;
+    case LCDST7789_MODE_BUFFER_80x80:
+      gfx.data.width = 80;
+      gfx.data.height = 80;
+      gfx.data.bpp = 8;
+      bufferSize = 80*80;
+      break;
+  }
+  if (bufferSize) {
+    jsvGarbageCollect();
+    jsvDefragment();
+    JsVar *arrData = jsvNewFlatStringOfLength(bufferSize);
+    if (arrData) {
+      jsvObjectSetChildAndUnLock(gfx.graphicsVar, "buffer", jsvNewArrayBufferFromString(arrData, (unsigned int)bufferSize));
+    } else {
+      jsExceptionHere(JSET_ERROR, "Not enough memory to allocate offscreen buffer");
+      jswrap_banglejs_setLCDMode(0); // go back to default mode
+      return;
+    }
+    jsvUnLock(arrData);
+  }
+  graphicsStructResetState(&gfx); // reset colour, cliprect, etc
   graphicsSetVar(&gfx);
   jsvUnLock(graphics);
   lcdST7789_setMode( lcdMode );
+}
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "getLCDMode",
+    "generate" : "jswrap_banglejs_getLCDMode",
+    "return" : ["JsVar","The LCD mode as a String"],
+    "ifdef" : "BANGLEJS"
+}
+The current LCD mode.
+
+See `Bangle.setLCDMode` for examples.
+*/
+JsVar *jswrap_banglejs_getLCDMode() {
+  const char *name=0;
+  switch (lcdST7789_getMode()) {
+    case LCDST7789_MODE_NULL:
+      name = "null";
+      break;
+    case LCDST7789_MODE_UNBUFFERED:
+      name = "direct";
+      break;
+    case LCDST7789_MODE_DOUBLEBUFFERED:
+      name = "doublebuffered";
+      break;
+    case LCDST7789_MODE_BUFFER_120x120:
+      name = "120x120";
+      break;
+    case LCDST7789_MODE_BUFFER_80x80:
+      name = "80x80";
+      break;
+  }
+  if (!name) return 0;
+  return jsvNewFromString(name);
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "setLCDOffset",
+    "generate" : "jswrap_banglejs_setLCDOffset",
+    "params" : [
+      ["y","int","The amount of pixels to shift the LCD up or down"]
+    ],
+    "ifdef" : "BANGLEJS"
+}
+This can be used to move the displayed memory area up or down temporarily. It's
+used for displaying notifications while keeping the main display contents
+intact.
+*/
+void jswrap_banglejs_setLCDOffset(int y) {
+  lcdST7789_setYOffset(y);
 }
 
 /*JSON{
@@ -793,9 +1004,11 @@ void jswrap_banglejs_setPollInterval(JsVarFloat interval) {
     return;
   }
   pollInterval = (uint16_t)interval;
+#ifndef EMSCRIPTEN
   JsSysTime t = jshGetTimeFromMilliseconds(pollInterval);
   jstStopExecuteFn(peripheralPollHandler, 0);
   jstExecuteFn(peripheralPollHandler, NULL, jshGetSystemTime()+t, t);
+#endif
 }
 
 /*JSON{
@@ -810,23 +1023,59 @@ void jswrap_banglejs_setPollInterval(JsVarFloat interval) {
 }
 Set internal options used for gestures, step counting, etc...
 
-* `gestureStartThresh`  how big a difference before we consider a gesture started? default = `sqr(800)`
+* `wakeOnBTN1` should the LCD turn on when BTN1 is pressed? default = `true`
+* `wakeOnBTN2` should the LCD turn on when BTN2 is pressed? default = `true`
+* `wakeOnBTN3` should the LCD turn on when BTN3 is pressed? default = `true`
+* `wakeOnFaceUp` should the LCD turn on when the watch is turned face up? default = `false`
+* `wakeOnTouch` should the LCD turn on when the touchscreen is pressed? default = `false`
+* `wakeOnTwist` should the LCD turn on when the watch is twisted? default = `true`
+* `twistThreshold`  How much acceleration to register a twist of the watch strap? Can be negative for oppsite direction. default = `800`
+* `twistMaxY` Maximum acceleration in Y to trigger a twist (low Y means watch is facing the right way up). default = `-800`
+* `twistTimeout`  How little time (in ms) must a twist take from low->high acceleration? default = `1000`
+
+* `gestureStartThresh` how big a difference before we consider a gesture started? default = `sqr(800)`
 * `gestureEndThresh` how small a difference before we consider a gesture ended? default = `sqr(2000)`
 * `gestureInactiveCount` how many samples do we keep after a gesture has ended? default = `4`
 * `gestureMinLength` how many samples must a gesture have before we notify about it? default = `10`
+*
 * `stepCounterThresholdLow` How low must acceleration magnitude squared get before we consider the next rise a step? default = `sqr(8192-80)`
 * `stepCounterThresholdHigh` How high must acceleration magnitude squared get before we consider it a step? default = `sqr(8192+80)`
+
+Where accelerations are used they are in internal units, where `8192 = 1g`
+
 */
 void jswrap_banglejs_setOptions(JsVar *options) {
+  bool wakeOnBTN1 = bangleFlags&JSBF_WAKEON_BTN1;
+  bool wakeOnBTN2 = bangleFlags&JSBF_WAKEON_BTN2;
+  bool wakeOnBTN3 = bangleFlags&JSBF_WAKEON_BTN3;
+  bool wakeOnFaceUp = bangleFlags&JSBF_WAKEON_FACEUP;
+  bool wakeOnTouch = bangleFlags&JSBF_WAKEON_TOUCH;
+  bool wakeOnTwist = bangleFlags&JSBF_WAKEON_TWIST;
   jsvConfigObject configs[] = {
       {"gestureStartThresh", JSV_INTEGER, &accelGestureStartThresh},
       {"gestureEndThresh", JSV_INTEGER, &accelGestureEndThresh},
       {"gestureInactiveCount", JSV_INTEGER, &accelGestureInactiveCount},
       {"gestureMinLength", JSV_INTEGER, &accelGestureMinLength},
       {"stepCounterThresholdLow", JSV_INTEGER, &stepCounterThresholdLow},
-      {"stepCounterThresholdHigh", JSV_INTEGER, &stepCounterThresholdHigh}
+      {"stepCounterThresholdHigh", JSV_INTEGER, &stepCounterThresholdHigh},
+      {"twistThreshold", JSV_INTEGER, &twistThreshold},
+      {"twistTimeout", JSV_INTEGER, &twistTimeout},
+      {"twistMaxY", JSV_INTEGER, &twistMaxY},
+      {"wakeOnBTN1", JSV_BOOLEAN, &wakeOnBTN1},
+      {"wakeOnBTN2", JSV_BOOLEAN, &wakeOnBTN2},
+      {"wakeOnBTN3", JSV_BOOLEAN, &wakeOnBTN3},
+      {"wakeOnFaceUp", JSV_BOOLEAN, &wakeOnFaceUp},
+      {"wakeOnTouch", JSV_BOOLEAN, &wakeOnTouch},
+      {"wakeOnTwist", JSV_BOOLEAN, &wakeOnTwist},
   };
-  jsvReadConfigObject(options, configs, sizeof(configs) / sizeof(jsvConfigObject));
+  if (jsvReadConfigObject(options, configs, sizeof(configs) / sizeof(jsvConfigObject))) {
+    bangleFlags = (bangleFlags&~JSBF_WAKEON_BTN1) | (wakeOnBTN1?JSBF_WAKEON_BTN1:0);
+    bangleFlags = (bangleFlags&~JSBF_WAKEON_BTN2) | (wakeOnBTN2?JSBF_WAKEON_BTN2:0);
+    bangleFlags = (bangleFlags&~JSBF_WAKEON_BTN3) | (wakeOnBTN3?JSBF_WAKEON_BTN3:0);
+    bangleFlags = (bangleFlags&~JSBF_WAKEON_FACEUP) | (wakeOnFaceUp?JSBF_WAKEON_FACEUP:0);
+    bangleFlags = (bangleFlags&~JSBF_WAKEON_TOUCH) | (wakeOnTouch?JSBF_WAKEON_TOUCH:0);
+    bangleFlags = (bangleFlags&~JSBF_WAKEON_TWIST) | (wakeOnTwist?JSBF_WAKEON_TWIST:0);
+  }
 }
 
 /*JSON{
@@ -838,7 +1087,8 @@ void jswrap_banglejs_setOptions(JsVar *options) {
     "ifdef" : "BANGLEJS"
 }
 */
-bool jswrap_banglejs_isLCDOn() {
+// emscripten bug means we can't use 'bool' as return value here!
+int jswrap_banglejs_isLCDOn() {
   return lcdPowerOn;
 }
 
@@ -851,7 +1101,8 @@ bool jswrap_banglejs_isLCDOn() {
     "ifdef" : "BANGLEJS"
 }
 */
-bool jswrap_banglejs_isCharging() {
+// emscripten bug means we can't use 'bool' as return value here!
+int jswrap_banglejs_isCharging() {
   return !jshPinGetValue(BAT_PIN_CHARGING);
 }
 
@@ -906,6 +1157,7 @@ Bangle.on('HRM',print);
 *When on, the Heart rate monitor draws roughly 5mA*
 */
 void jswrap_banglejs_setHRMPower(bool isOn) {
+#ifndef EMSCRIPTEN
   jstStopExecuteFn(hrmPollHandler, 0);
   if (isOn) {
     jshPinAnalog(HEARTRATE_PIN_ANALOG);
@@ -917,6 +1169,7 @@ void jswrap_banglejs_setHRMPower(bool isOn) {
   } else {
     jswrap_banglejs_ioWr(IOEXP_HRM, 1); // HRM off
   }
+#endif
 }
 
 /*JSON{
@@ -941,6 +1194,7 @@ Bangle.on('GPS',print);
 *When on, the GPS draws roughly 20mA*
 */
 void jswrap_banglejs_setGPSPower(bool isOn) {
+#ifndef EMSCRIPTEN
   if (isOn) {
     JshUSARTInfo inf;
     jshUSARTInitInfo(&inf);
@@ -950,12 +1204,14 @@ void jswrap_banglejs_setGPSPower(bool isOn) {
     jshUSARTSetup(GPS_UART, &inf);
     jswrap_banglejs_ioWr(IOEXP_GPS, 1); // GPS on
     nmeaCount = 0;
+    memset(&gpsFix,0,sizeof(gpsFix));
   } else {
     jswrap_banglejs_ioWr(IOEXP_GPS, 0); // GPS off
     // setting pins to pullup will cause jshardware.c to disable the UART, saving power
     jshPinSetState(GPS_PIN_RX, JSHPINSTATE_GPIO_IN_PULLUP);
     jshPinSetState(GPS_PIN_TX, JSHPINSTATE_GPIO_IN_PULLUP);
   }
+#endif
 }
 
 /*JSON{
@@ -993,12 +1249,83 @@ void jswrap_banglejs_setCompassPower(bool isOn) {
   magmax.z = 0;
 }
 
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "getCompass",
+    "generate" : "jswrap_banglejs_getCompass",
+    "return" : ["JsVar","An object containing magnetometer readings (as below)"],
+    "ifdef" : "BANGLEJS"
+}
+Get the most recent Magnetometer/Compass reading. Data is in the same format as the `Bangle.on('mag',` event.
+
+Returns an `{x,y,z,dx,dy,dz,heading}` object
+
+* `x/y/z` raw x,y,z magnetometer readings
+* `dx/dy/dz` readings based on calibration since magnetometer turned on
+* `heading` in degrees based on calibrated readings (will be NaN if magnetometer hasn't been rotated around 360 degrees)
+
+To get this event you must turn the compass on
+with `Bangle.setCompassPower(1)`.*/
+JsVar *jswrap_banglejs_getCompass() {
+  JsVar *o = jsvNewObject();
+  if (o) {
+    jsvObjectSetChildAndUnLock(o, "x", jsvNewFromInteger(mag.x));
+    jsvObjectSetChildAndUnLock(o, "y", jsvNewFromInteger(mag.y));
+    jsvObjectSetChildAndUnLock(o, "z", jsvNewFromInteger(mag.z));
+    int dx = mag.x - ((magmin.x+magmax.x)/2);
+    int dy = mag.y - ((magmin.y+magmax.y)/2);
+    int dz = mag.z - ((magmin.z+magmax.z)/2);
+    jsvObjectSetChildAndUnLock(o, "dx", jsvNewFromInteger(dx));
+    jsvObjectSetChildAndUnLock(o, "dy", jsvNewFromInteger(dy));
+    jsvObjectSetChildAndUnLock(o, "dz", jsvNewFromInteger(dz));
+    int cx = magmax.x-magmin.x;
+    int cy = magmax.y-magmin.y;
+    int c = cx*cx+cy*cy;
+    double h = NAN;
+    if (c>3000) { // only give a heading if we think we have valid data (eg enough magnetic field difference in min/max
+      h = jswrap_math_atan2(dx,dy)*180/PI;
+      if (h<0) h+=360;
+    }
+    jsvObjectSetChildAndUnLock(o, "heading", jsvNewFromFloat(h));
+  }
+  return o;
+}
+
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "getAccel",
+    "generate" : "jswrap_banglejs_getAccel",
+    "return" : ["JsVar","An object containing accelerometer readings (as below)"],
+    "ifdef" : "BANGLEJS"
+}
+Get the most recent accelerometer reading. Data is in the same format as the `Bangle.on('accel',` event.
+
+* `x` is X axis (left-right) in `g`
+* `y` is Y axis (up-down) in `g`
+* `z` is Z axis (in-out) in `g`
+* `diff` is difference between this and the last reading in `g`
+* `mag` is the magnitude of the acceleration in `g`
+*/
+JsVar *jswrap_banglejs_getAccel() {
+  JsVar *o = jsvNewObject();
+  if (o) {
+    jsvObjectSetChildAndUnLock(o, "x", jsvNewFromFloat(acc.x/8192.0));
+    jsvObjectSetChildAndUnLock(o, "y", jsvNewFromFloat(acc.y/8192.0));
+    jsvObjectSetChildAndUnLock(o, "z", jsvNewFromFloat(acc.z/8192.0));
+    jsvObjectSetChildAndUnLock(o, "mag", jsvNewFromFloat(sqrt(accMagSquared)/8192.0));
+    jsvObjectSetChildAndUnLock(o, "diff", jsvNewFromFloat(sqrt(accdiff)/8192.0));
+  }
+  return o;
+}
 
 /*JSON{
   "type" : "init",
   "generate" : "jswrap_banglejs_init"
 }*/
 void jswrap_banglejs_init() {
+#ifndef EMSCRIPTEN
   jshPinOutput(18,0); // what's this?
   jshPinOutput(VIBRATE_PIN,0); // vibrate off
 
@@ -1032,22 +1359,21 @@ void jswrap_banglejs_init() {
   jswrap_banglejs_ioWr(IOEXP_LCD_RESET,1); // LCD reset off
   jswrap_banglejs_ioWr(IOEXP_LCD_BACKLIGHT,0); // backlight on
   jshDelayMicroseconds(10000);
-
+#endif
+  bangleFlags = JSBF_DEFAULT;
   lcdPowerOn = true;
   lcdBrightness = 255;
   lcdPowerTimeout = DEFAULT_LCD_POWER_TIMEOUT;
+  lcdWakeButton = 0;
   // Create backing graphics for LCD
   JsVar *graphics = jspNewObject(0, "Graphics");
   if (!graphics) return; // low memory
   JsGraphics gfx;
-  graphicsStructInit(&gfx);
+  graphicsStructInit(&gfx, LCD_WIDTH, LCD_HEIGHT, LCD_BPP);
   gfx.data.type = JSGRAPHICSTYPE_ST7789_8BIT;
   gfx.data.flags = 0;
   gfx.data.fontSize = JSGRAPHICS_FONTSIZE_6X8+1;
   gfx.graphicsVar = graphics;
-  gfx.data.width = LCD_WIDTH;
-  gfx.data.height = LCD_HEIGHT;
-  gfx.data.bpp = LCD_BPP;
 
   //gfx.data.fontSize = JSGRAPHICS_FONTSIZE_6X8;
   lcdST7789_init(&gfx);
@@ -1078,7 +1404,11 @@ void jswrap_banglejs_init() {
     jsvUnLock(img);
     y += 104-28;
     char addrStr[20];
+#ifndef EMSCRIPTEN
     JsVar *addr = jswrap_ble_getAddress(); // Write MAC address in bottom right
+#else
+    JsVar *addr = jsvNewFromString("");
+#endif
     jsvGetString(addr, addrStr, sizeof(addrStr));
     jsvUnLock(addr);
     jswrap_graphics_drawCString(&gfx,8,y,JS_VERSION);
@@ -1089,7 +1419,8 @@ void jswrap_banglejs_init() {
 
   jsvUnLock(graphics);
 
-  // accelerometer init
+#ifndef EMSCRIPTEN
+  // KX023-1025 accelerometer init
   jswrap_banglejs_accelWr(0x18,0x0a); // CNTL1 Off (top bit)
   jswrap_banglejs_accelWr(0x19,0x80); // CNTL2 Software reset
   jshDelayMicroseconds(2000);
@@ -1114,20 +1445,25 @@ void jswrap_banglejs_init() {
   jswrap_banglejs_accelWr(0x3e,0); // clear the buffer
   jswrap_banglejs_accelWr(0x18,0b01101100);  // CNTL1 Off, high power, DRDYE=1, 4g range, TDTE (tap enable)=1, Wakeup=0, Tilt=0
   jswrap_banglejs_accelWr(0x18,0b11101100);  // CNTL1 On, high power, DRDYE=1, 4g range, TDTE (tap enable)=1, Wakeup=0, Tilt=0
+#endif
   // Accelerometer variables init
   stepCounter = 0;
   stepWasLow = false;
+#ifndef EMSCRIPTEN
   // compass init
   jswrap_banglejs_compassWr(0x32,1);
   jswrap_banglejs_compassWr(0x31,0);
+#endif
   compassPowerOn = false;
   i2cBusy = false;
   // Other IO
   jshPinSetState(BAT_PIN_CHARGING, JSHPINSTATE_GPIO_IN_PULLUP);
   // touch
+  touchStatus = TS_NONE;
   touchLastState = 0;
   touchLastState2 = 0;
 
+#ifndef EMSCRIPTEN
   { // Flash memory - on first boot we might need to erase it
     char buf[sizeof(JsfFileHeader)];
     jshFlashRead(buf, FLASH_SAVED_CODE_START, sizeof(buf));
@@ -1139,7 +1475,9 @@ void jswrap_banglejs_init() {
       jsfEraseAll();
     }
   }
+#endif
 
+#ifndef EMSCRIPTEN
   // Add watchdog timer to ensure watch always stays usable (hopefully!)
   // This gets killed when _kill / _init happens
   //  - the bootloader probably already set this up so the
@@ -1149,6 +1487,7 @@ void jswrap_banglejs_init() {
   pollInterval = DEFAULT_ACCEL_POLL_INTERVAL;
   JsSysTime t = jshGetTimeFromMilliseconds(pollInterval);
   jstExecuteFn(peripheralPollHandler, NULL, jshGetSystemTime()+t, t);
+#endif
 
   IOEventFlags channel;
   jshSetPinShouldStayWatched(BTN1_PININDEX,true);
@@ -1173,10 +1512,12 @@ void jswrap_banglejs_init() {
   "generate" : "jswrap_banglejs_kill"
 }*/
 void jswrap_banglejs_kill() {
+#ifndef EMSCRIPTEN
   jstStopExecuteFn(backlightOnHandler, 0);
   jstStopExecuteFn(backlightOffHandler, 0);
   jstStopExecuteFn(peripheralPollHandler, 0);
   jstStopExecuteFn(hrmPollHandler, 0);
+#endif
   jsvUnLock(promiseBeep);
   promiseBeep = 0;
   jsvUnLock(promiseBuzz);
@@ -1208,13 +1549,8 @@ bool jswrap_banglejs_idle() {
   if (bangleTasks & JSBT_LCD_ON) jswrap_banglejs_setLCDPower(1);
   if (bangleTasks & JSBT_ACCEL_DATA) {
     if (bangle && jsiObjectHasCallbacks(bangle, JS_EVENT_PREFIX"accel")) {
-      JsVar *o = jsvNewObject();
+      JsVar *o = jswrap_banglejs_getAccel();
       if (o) {
-        jsvObjectSetChildAndUnLock(o, "x", jsvNewFromFloat(acc.x/8192.0));
-        jsvObjectSetChildAndUnLock(o, "y", jsvNewFromFloat(acc.y/8192.0));
-        jsvObjectSetChildAndUnLock(o, "z", jsvNewFromFloat(acc.z/8192.0));
-        jsvObjectSetChildAndUnLock(o, "mag", jsvNewFromFloat(sqrt(accMagSquared)/8192.0));
-        jsvObjectSetChildAndUnLock(o, "diff", jsvNewFromFloat(sqrt(accdiff)/8192.0));
         jsiQueueObjectCallbacks(bangle, JS_EVENT_PREFIX"accel", &o, 1);
         jsvUnLock(o);
       }
@@ -1231,7 +1567,7 @@ bool jswrap_banglejs_idle() {
         jsiQueueObjectCallbacks(bangle, JS_EVENT_PREFIX"faceUp", &v, 1);
         jsvUnLock(v);
       }
-      if (faceUp && lcdPowerTimeout && !lcdPowerOn) {
+      if (faceUp && lcdPowerTimeout && !lcdPowerOn && (bangleFlags&JSBF_WAKEON_FACEUP)) {
         // LCD was turned off, turn it back on
         jswrap_banglejs_setLCDPower(1);
         flipTimer = 0;
@@ -1274,26 +1610,8 @@ bool jswrap_banglejs_idle() {
   }
   if (bangle && (bangleTasks & JSBT_MAG_DATA)) {
     if (bangle && jsiObjectHasCallbacks(bangle, JS_EVENT_PREFIX"mag")) {
-      JsVar *o = jsvNewObject();
+      JsVar *o = jswrap_banglejs_getCompass();
       if (o) {
-        jsvObjectSetChildAndUnLock(o, "x", jsvNewFromInteger(mag.x));
-        jsvObjectSetChildAndUnLock(o, "y", jsvNewFromInteger(mag.y));
-        jsvObjectSetChildAndUnLock(o, "z", jsvNewFromInteger(mag.z));
-        int dx = mag.x - ((magmin.x+magmax.x)/2);
-        int dy = mag.y - ((magmin.y+magmax.y)/2);
-        int dz = mag.z - ((magmin.z+magmax.z)/2);
-        jsvObjectSetChildAndUnLock(o, "dx", jsvNewFromInteger(dx));
-        jsvObjectSetChildAndUnLock(o, "dy", jsvNewFromInteger(dy));
-        jsvObjectSetChildAndUnLock(o, "dz", jsvNewFromInteger(dz));
-        int cx = magmax.x-magmin.x;
-        int cy = magmax.y-magmin.y;
-        int c = cx*cx+cy*cy;
-        double h = NAN;
-        if (c>3000) { // only give a heading if we think we have valid data (eg enough magnetic field difference in min/max
-          h = jswrap_math_atan2(dx,dy)*180/PI;
-          if (h<0) h+=360;
-        }
-        jsvObjectSetChildAndUnLock(o, "heading", jsvNewFromFloat(h));
         jsiQueueObjectCallbacks(bangle, JS_EVENT_PREFIX"mag", &o, 1);
         jsvUnLock(o);
       }
@@ -1304,7 +1622,7 @@ bool jswrap_banglejs_idle() {
     if (o) {
       const int BPM_MIN = 40;
       const int BPM_MAX = 200;
-      const int SAMPLES_PER_SEC = 1000 / HRM_POLL_INTERVAL;
+      //const int SAMPLES_PER_SEC = 1000 / HRM_POLL_INTERVAL;
       const int CMIN = 60000 / (BPM_MAX*HRM_POLL_INTERVAL);
       const int CMAX = 60000 / (BPM_MIN*HRM_POLL_INTERVAL);
       assert(CMAX<HRM_HISTORY_LEN);
@@ -1343,7 +1661,7 @@ bool jswrap_banglejs_idle() {
 
       jsvObjectSetChildAndUnLock(o,"bpm",jsvNewFromInteger(60000 / (minIdx*HRM_POLL_INTERVAL)));
       jsvObjectSetChildAndUnLock(o,"confidence",jsvNewFromInteger(confidence));
-      JsVar *s = jsvNewNativeString(hrmHistory, sizeof(hrmHistory));
+      JsVar *s = jsvNewNativeString((char*)hrmHistory, sizeof(hrmHistory));
       JsVar *ab = jsvNewArrayBufferFromString(s,0);
       jsvObjectSetChildAndUnLock(o,"raw",jswrap_typedarray_constructor(ARRAYBUFFERVIEW_INT8,ab,0,0));
       jsvUnLock2(ab,s);
@@ -1380,7 +1698,7 @@ bool jswrap_banglejs_idle() {
     }
 #ifdef USE_TENSORFLOW
     if (bangle && jsiObjectHasCallbacks(bangle, JS_EVENT_PREFIX"aiGesture")) {
-      //JsVar *model = jsfReadFile(jsfNameFromString(".tfmodel"));
+      //JsVar *model = jsfReadFile(jsfNameFromString(".tfmodel"),0,0);
       JsfFileHeader header;
       uint32_t modelAddr = jsfFindFile(jsfNameFromString(".tfmodel"), &header);
 
@@ -1449,13 +1767,17 @@ bool jswrap_banglejs_idle() {
     jsiQueueObjectCallbacks(bangle, JS_EVENT_PREFIX"step", &steps, 1);
     jsvUnLock(steps);
   }
+  if (bangle && (bangleTasks & JSBT_TWIST_EVENT)) {
+    jsiQueueObjectCallbacks(bangle, JS_EVENT_PREFIX"twist", NULL, 0);
+  }
   if (bangle && (bangleTasks & JSBT_SWIPE_MASK)) {
     JsVar *o = jsvNewFromInteger((bangleTasks & JSBT_SWIPE_LEFT)?-1:1);
     jsiQueueObjectCallbacks(bangle, JS_EVENT_PREFIX"swipe", &o, 1);
     jsvUnLock(o);
   }
   if (bangle && (bangleTasks & JSBT_TOUCH_MASK)) {
-    JsVar *o = jsvNewFromInteger((bangleTasks & JSBT_TOUCH_LEFT)?1:2);
+    JsVar *o = jsvNewFromInteger(((bangleTasks & JSBT_TOUCH_LEFT)?1:0) |
+                                 ((bangleTasks & JSBT_TOUCH_RIGHT)?2:0));
     jsiQueueObjectCallbacks(bangle, JS_EVENT_PREFIX"touch", &o, 1);
     jsvUnLock(o);
   }
@@ -1531,12 +1853,14 @@ JsVar *jswrap_banglejs_dbg() {
 Writes a register on the KX023 Accelerometer
 */
 void jswrap_banglejs_accelWr(JsVarInt reg, JsVarInt data) {
+#ifndef EMSCRIPTEN
   unsigned char buf[2];
   buf[0] = (unsigned char)reg;
   buf[1] = (unsigned char)data;
   i2cBusy = true;
   jsi2cWrite(&internalI2C, ACCEL_ADDR, 2, buf, true);
   i2cBusy = false;
+#endif
 }
 
 /*JSON{
@@ -1553,6 +1877,7 @@ void jswrap_banglejs_accelWr(JsVarInt reg, JsVarInt data) {
 Reads a register from the KX023 Accelerometer
 */
 int jswrap_banglejs_accelRd(JsVarInt reg) {
+#ifndef EMSCRIPTEN
   unsigned char buf[1];
   buf[0] = (unsigned char)reg;
   i2cBusy = true;
@@ -1560,7 +1885,11 @@ int jswrap_banglejs_accelRd(JsVarInt reg) {
   jsi2cRead(&internalI2C, ACCEL_ADDR, 1, buf, true);
   i2cBusy = false;
   return buf[0];
+#else
+  return 0;
+#endif
 }
+
 
 /*JSON{
     "type" : "staticmethod",
@@ -1576,12 +1905,14 @@ int jswrap_banglejs_accelRd(JsVarInt reg) {
 Writes a register on the Magnetometer/Compass
 */
 void jswrap_banglejs_compassWr(JsVarInt reg, JsVarInt data) {
+#ifndef EMSCRIPTEN
   unsigned char buf[2];
   buf[0] = (unsigned char)reg;
   buf[1] = (unsigned char)data;
   i2cBusy = true;
   jsi2cWrite(&internalI2C, MAG_ADDR, 2, buf, true);
   i2cBusy = false;
+#endif
 }
 
 /*JSON{
@@ -1598,12 +1929,14 @@ void jswrap_banglejs_compassWr(JsVarInt reg, JsVarInt data) {
 Changes a pin state on the IO expander
 */
 void jswrap_banglejs_ioWr(JsVarInt mask, bool on) {
+#ifndef EMSCRIPTEN
   static unsigned char state;
   if (on) state |= mask;
   else state &= ~mask;
   i2cBusy = true;
   jsi2cWrite(&internalI2C, 0x20, 1, &state, true);
   i2cBusy = false;
+#endif
 }
 
 
@@ -1690,7 +2023,7 @@ JsVar *jswrap_banglejs_beep(int time, int freq) {
       ["time","int","Time in ms (default 200)"],
       ["strength","float","Power of vibration from 0 to 1 (Default 1)"]
     ],
-    "return" : ["JsVar","A promise, completed when beep is finished"],
+    "return" : ["JsVar","A promise, completed when vibration is finished"],
     "return_object":"Promise",
     "ifdef" : "BANGLEJS"
 }
@@ -1731,17 +2064,24 @@ JsVar *jswrap_banglejs_buzz(int time, JsVarFloat amt) {
 Turn Bangle.js off. It can only be woken by pressing BTN1.
 */
 void jswrap_banglejs_off() {
+#ifndef EMSCRIPTEN
   jsiKill();
   jsvKill();
   jshKill();
+
   jswrap_banglejs_ioWr(IOEXP_GPS, 0); // GPS off
   jshPinOutput(VIBRATE_PIN,0); // vibrate off
   jswrap_banglejs_setLCDPower(0);
+  jswrap_banglejs_accelWr(0x18,0x0a); // accelerometer off
+  jswrap_banglejs_compassWr(0x31,0); // compass off
 
   nrf_gpio_cfg_sense_set(BTN2_PININDEX, NRF_GPIO_PIN_NOSENSE);
   nrf_gpio_cfg_sense_set(BTN3_PININDEX, NRF_GPIO_PIN_NOSENSE);
   nrf_gpio_cfg_sense_set(BTN1_PININDEX, NRF_GPIO_PIN_SENSE_LOW);
   sd_power_system_off();
+#else
+  jsExceptionHere(JSET_ERROR, ".off not implemented on emulator");
+#endif
 }
 
 /*JSON{
@@ -1749,9 +2089,6 @@ void jswrap_banglejs_off() {
     "class" : "Bangle",
     "name" : "getLogo",
     "generate" : "jswrap_banglejs_getLogo",
-    "params" : [
-      ["menu","JsVar","Get the Bangle.js logo as an image that can be used with `g.drawImage`"]
-    ],
     "return" : ["JsVar", "An image to be used with `g.drawImage` - 222 x 104 x 2 bits" ],
     "ifdef" : "BANGLEJS"
 }
@@ -1850,7 +2187,7 @@ JsVar *jswrap_banglejs_getLogo() {
           247, 227, 97, 62, 3, 107, 224, 102, 225, 70, 215, 192, 35, 227, 97,
           58, 0, 177, 0
  };
-  JsVar *v = jsvNewNativeString(&img_compressed[0], sizeof(img_compressed));
+  JsVar *v = jsvNewNativeString((char*)&img_compressed[0], sizeof(img_compressed));
   JsVar *img = jswrap_heatshrink_decompress(v);
   jsvUnLock(v);
   return img;
@@ -1859,17 +2196,38 @@ JsVar *jswrap_banglejs_getLogo() {
 /*JSON{
     "type" : "staticmethod",
     "class" : "Bangle",
-    "name" : "menu",
-    "generate" : "gen_jswrap_E_showMenu",
-    "params" : [
-      ["menu","JsVar","An object containing name->function mappings to to be used in a menu"]
-    ],
-    "return" : ["JsVar", "A menu object with `draw`, `move` and `select` functions" ],
+    "name" : "loadWidgets",
+    "generate_js" : "libs/js/banglejs/Bangle_loadWidgets.min.js",
     "ifdef" : "BANGLEJS"
 }
-Display a menu on the screen, and set up the buttons to navigate through it.
+Load all widgets from flash Storage. Call this once at the beginning
+of your application if you want any on-screen widgets to be loaded.
 
-DEPRECATED: Use `E.showMenu`
+They will be loaded into a global `WIDGETS` array, and
+can be rendered with `Bangle.drawWidgets`.
+*/
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "drawWidgets",
+    "generate_js" : "libs/js/banglejs/Bangle_drawWidgets.min.js",
+    "ifdef" : "BANGLEJS"
+}
+Draw any onscreen widgets that were loaded with `Bangle.loadWidgets()`.
+
+Widgets should redraw themselves when something changes - you'll only
+need to call drawWidgets if you decide to clear the entire screen
+with `g.clear()`.
+*/
+/*JSON{
+    "type" : "staticmethod",
+    "class" : "Bangle",
+    "name" : "showLauncher",
+    "generate_js" : "libs/js/banglejs/Bangle_showLauncher.min.js",
+    "ifdef" : "BANGLEJS"
+}
+Load the Bangle.js app launcher, which will allow the user
+to select an application to launch.
 */
 
 /*JSON{
@@ -2020,3 +2378,45 @@ E.showAlert("These are\nLots of\nLines","My Title").then(function() {
 To remove the window, call `E.showAlert()` with no arguments.
 */
 
+/*JSON{
+    "type" : "variable",
+    "name" : "LED",
+    "generate" : "gen_jswrap_LED1",
+    "return" : ["JsVar","A `Pin` object for a fake LED which appears on "],
+    "ifdef" : "BANGLEJS"
+}
+
+On most Espruino board there are LEDs, in which case `LED` will be an actual Pin.
+
+On Bangle.js there are no LEDs, so to remain compatible with example code that might
+expect an LED, this is an object that behaves like a pin, but which just displays
+a circle on the display
+*/
+/*JSON{
+    "type" : "variable",
+    "name" : "LED1",
+    "generate_js" : "libs/js/banglejs/LED1.min.js",
+    "return" : ["JsVar","A `Pin` object for a fake LED which appears on "],
+    "ifdef" : "BANGLEJS"
+}
+
+On most Espruino board there are LEDs, in which case `LED1` will be an actual Pin.
+
+On Bangle.js there are no LEDs, so to remain compatible with example code that might
+expect an LED, this is an object that behaves like a pin, but which just displays
+a circle on the display
+*/
+/*JSON{
+    "type" : "variable",
+    "name" : "LED2",
+    "generate_js" : "libs/js/banglejs/LED2.min.js",
+    "return" : ["JsVar","A `Pin` object for a fake LED which appears on "],
+    "ifdef" : "BANGLEJS"
+}
+
+On most Espruino board there are LEDs, in which case `LED2` will be an actual Pin.
+
+On Bangle.js there are no LEDs, so to remain compatible with example code that might
+expect an LED, this is an object that behaves like a pin, but which just displays
+a circle on the display
+*/

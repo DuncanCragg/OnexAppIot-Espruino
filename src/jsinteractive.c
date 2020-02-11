@@ -509,15 +509,7 @@ void jsiSoftInit(bool hasBeenReset) {
   // to fiddle with them.
 
   // Execute `init` events on `E`
-  JsVar *E = jsvObjectGetChild(execInfo.root, "E", 0);
-  if (E) {
-    JsVar *callback = jsvObjectGetChild(E, INIT_CALLBACK_NAME, 0);
-    if (callback) {
-      jsiExecuteEventCallback(0, callback, 0, 0);
-      jsvUnLock(callback);
-    }
-    jsvUnLock(E);
-  }
+  jsiExecuteEventCallbackOn("E", INIT_CALLBACK_NAME, 0, 0);
   // Execute the `onInit` function
   JsVar *onInit = jsvObjectGetChild(execInfo.root, JSI_ONINIT_NAME, 0);
   if (onInit) {
@@ -538,7 +530,7 @@ void jsiDumpJSON(vcbprintf_callback user_callback, void *user_data, JsVar *data,
     cbprintf(user_callback, user_data, "%v", name);
   } else {
     // if it doesn't, print JSON
-    jsfGetJSONWithCallback(data, JSON_SOME_NEWLINES | JSON_PRETTY | JSON_SHOW_DEVICES, 0, user_callback, user_data);
+    jsfGetJSONWithCallback(data, NULL, JSON_SOME_NEWLINES | JSON_PRETTY | JSON_SHOW_DEVICES, 0, user_callback, user_data);
   }
 }
 
@@ -616,7 +608,7 @@ void jsiDumpSerialInitialisation(vcbprintf_callback user_callback, void *user_da
       cbprintf(user_callback, user_data, "%s.setup(%d", serialName, baudrate);
       if (jsvIsObject(options)) {
         user_callback(", ", user_data);
-        jsfGetJSONWithCallback(options, JSON_SHOW_DEVICES, 0, user_callback, user_data);
+        jsfGetJSONWithCallback(options, NULL, JSON_SHOW_DEVICES, 0, user_callback, user_data);
       }
       user_callback(");\n", user_data);
     }
@@ -633,7 +625,7 @@ void jsiDumpDeviceInitialisation(vcbprintf_callback user_callback, void *user_da
     if (options) {
       cbprintf(user_callback, user_data, "%s.setup(", deviceName);
       if (jsvIsObject(options))
-        jsfGetJSONWithCallback(options, JSON_SHOW_DEVICES, 0, user_callback, user_data);
+        jsfGetJSONWithCallback(options, NULL, JSON_SHOW_DEVICES, 0, user_callback, user_data);
       user_callback(");\n", user_data);
     }
     jsvUnLock2(options, deviceVar);
@@ -726,11 +718,13 @@ void jsiDumpHardwareInitialisation(vcbprintf_callback user_callback, void *user_
 // Used when shutting down before flashing
 // 'release' anything we are using, but ensure that it doesn't get freed
 void jsiSoftKill() {
+  // Execute `kill` events on `E`
+  jsiExecuteEventCallbackOn("E", KILL_CALLBACK_NAME, 0, 0);
+  // Clear input line...
   inputCursorPos = 0;
   jsiInputLineCursorMoved();
   jsvUnLock(inputLine);
   inputLine=0;
-
   // kill any wrapped stuff
   jswKill();
   // Stop all active timer tasks
@@ -904,7 +898,6 @@ void jsiOneSecondAfterStartup() {
 
 void jsiKill() {
   jsiSoftKill();
-
   jspKill();
 }
 
@@ -1165,15 +1158,9 @@ void jsiCheckErrors() {
   bool reportedError = false;
   JsVar *exception = jspGetException();
   if (exception) {
-    JsVar *process = jsvObjectGetChild(execInfo.root, "process", 0);
-    if (process) {
-      JsVar *callback = jsvObjectGetChild(process, JS_EVENT_PREFIX"uncaughtException", 0);
-      if (callback) {
-        jsiExecuteEventCallback(0, callback, 1, &exception);
-        jsvUnLock2(callback, exception);
-        exception = 0;
-      }
-      jsvUnLock(process);
+    if (jsiExecuteEventCallbackOn("E", JS_EVENT_PREFIX"uncaughtException", 1, &exception)) {
+      jsvUnLock(exception);
+      exception = 0;
     }
   }
   if (exception) {
@@ -1209,21 +1196,13 @@ void jsiCheckErrors() {
     // don't report an issue - we get unreported errors is process.on('unhandledException',)/etc is used
     //if (!reportedError) jsiConsolePrint("Error.\n");
     // remove any error flags
-    execInfo.execute &= ~EXEC_ERROR_MASK;
+    execInfo.execute &= (JsExecFlags)~EXEC_ERROR_MASK;
   }
   if (lastJsErrorFlags != jsErrorFlags) {
     JsErrorFlags newErrors = jsErrorFlags & ~lastJsErrorFlags;
     if (newErrors & ~JSERR_WARNINGS_MASK) {
       JsVar *v = jswrap_espruino_getErrorFlagArray(newErrors);
-      JsVar *E = jsvObjectGetChild(execInfo.root, "E", 0);
-      if (E) {
-        JsVar *callback = jsvObjectGetChild(E, JS_EVENT_PREFIX"errorFlag", 0);
-        if (callback) {
-          jsiExecuteEventCallback(0, callback, 1, &v);
-          jsvUnLock(callback);
-        }
-        jsvUnLock(E);
-      }
+      jsiExecuteEventCallbackOn("E", JS_EVENT_PREFIX"errorFlag", 1, &v);
       if (v) {
         jsiConsoleRemoveInputLine();
         jsiConsolePrintf("New interpreter error: %v\n", v);
@@ -1631,7 +1610,7 @@ void jsiHandleChar(char ch) {
     } else if (ch=='\t' && jsiEcho()) {
       jsiTabComplete();
 #endif
-    } else if (ch>=32 || ch=='\t') {
+    } else if (((unsigned char)ch)>=32 || ch=='\t') {
       char buf[2] = {ch,0};
       const char *strToAppend = (ch=='\t') ? "    " : buf;
       jsiAppendStringToInputLine(strToAppend);
@@ -1750,6 +1729,22 @@ NO_INLINE bool jsiExecuteEventCallback(JsVar *thisVar, JsVar *callbackVar, unsig
   }
   return true;
 }
+
+// Execute the named Event callback on the named object, and return true if it exists
+bool jsiExecuteEventCallbackOn(const char *objectName, const char *cbName, unsigned int argCount, JsVar **argPtr) {
+  bool executed = false;
+  JsVar *obj = jsvObjectGetChild(execInfo.root, objectName, 0);
+  if (jsvHasChildren(obj)) {
+    JsVar *callback = jsvObjectGetChild(obj, cbName, 0);
+    if (callback) {
+      jsiExecuteEventCallback(obj, callback, argCount, argPtr);
+      executed = true;
+    }
+    jsvUnLock2(callback, obj);
+  }
+  return executed;
+}
+
 
 /// Create a timeout in JS to execute the given native function (outside of an IRQ). Returns the index
 JsVar *jsiSetTimeout(void (*functionPtr)(void), JsVarFloat milliseconds) {
@@ -2212,16 +2207,33 @@ void jsiIdle() {
       jsiStatus &= (JsiStatus)~JSIS_TODO_FLASH_SAVE;
     }
     if ((s&JSIS_TODO_FLASH_LOAD) == JSIS_TODO_FLASH_LOAD) {
-      jsiSoftKill();
-      jspSoftKill();
-      jsvSoftKill();
-      jsvKill();
-      jshReset();
-      jsvInit(0);
-      jsfLoadStateFromFlash();
-      jsvSoftInit();
-      jspSoftInit();
-      jsiSoftInit(false /* not been reset */);
+      JsVar *filenameVar = jsvObjectGetChild(execInfo.hiddenRoot,JSI_LOAD_CODE_NAME,0);
+      // TODO: why can't we follow the same steps here for both?
+      if (filenameVar) {
+        JsfFileName filename = jsfNameFromVarAndUnLock(filenameVar);
+        // no need to jsvObjectRemoveChild as we're shutting down anyway!
+        // go through steps as if we're resetting
+        jsiKill();
+        jsvKill();
+        jshReset();
+        jsvInit(0);
+        jsiSemiInit(false); // don't autoload code
+        // load the code we specified
+        JsVar *code = jsfReadFile(filename,0,0);
+        if (code)
+          jsvUnLock2(jspEvaluateVar(code,0,0), code);
+      } else {
+        jsiSoftKill();
+        jspSoftKill();
+        jsvSoftKill();
+        jsvKill();
+        jshReset();
+        jsvInit(0);
+        jsfLoadStateFromFlash();
+        jsvSoftInit();
+        jspSoftInit();
+        jsiSoftInit(false /* not been reset */);
+      }
       jsiStatus &= (JsiStatus)~JSIS_TODO_FLASH_LOAD;
     }
     jsiSetBusy(BUSY_INTERACTIVE, false);
