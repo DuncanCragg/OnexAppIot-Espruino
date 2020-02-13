@@ -13,6 +13,8 @@
  */
 #include "jspin.h"
 
+#define IOEXP_HRM 0x80
+
 void jswrap_banglejs_lcdWr(JsVarInt cmd, JsVar *data);
 void jswrap_banglejs_setLCDPower(bool isOn);
 void jswrap_banglejs_setLCDBrightness(JsVarFloat v);

@@ -15,6 +15,9 @@
 #include "platform_config.h"
 #include "jsinteractive.h"
 #include "jshardware.h"
+#if defined(BOARD_BANGLE)
+#include "libs/banglejs/jswrap_bangle.h"
+#endif
 
 #if !defined(ONEX)
 
@@ -65,8 +68,12 @@ int main()
 
   onex_init("");
 
+#if defined(BOARD_BANGLE)
+  gpio_mode_cb(BTN4_PININDEX, JSHPINSTATE_GPIO_IN_PULLDOWN, button_changed);
+#else
   gpio_mode_cb(BTN1_PININDEX, JSHPINSTATE_GPIO_IN_PULLDOWN, button_changed);
   gpio_mode(LED1_PININDEX, JSHPINSTATE_GPIO_OUT);
+#endif
 
   onex_set_evaluators("evaluate_button", evaluate_edit_rule, evaluate_button_io, 0);
   onex_set_evaluators("evaluate_light",  evaluate_edit_rule, evaluate_light_logic, evaluate_light_io, 0);
@@ -109,11 +116,19 @@ bool evaluate_light_io(object* light, void* d)
 {
   if(object_property_is(light, "light", "on")){
     WHERESTHEHEAP("evaluate_light_io on");
+#if defined(BOARD_BANGLE)
+    jswrap_banglejs_ioWr(IOEXP_HRM,0);
+#else
     gpio_set(LED1_PININDEX, 1);
+#endif
   }
   else {
     WHERESTHEHEAP("evaluate_light_io off");
+#if defined(BOARD_BANGLE)
+    jswrap_banglejs_ioWr(IOEXP_HRM,1);
+#else
     gpio_set(LED1_PININDEX, 0);
+#endif
   }
   return true;
 }
