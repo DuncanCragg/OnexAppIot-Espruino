@@ -20,7 +20,7 @@ info = {
  'link' :  [ "http://www.espruino.com/Bangle.js" ],
  'espruino_page_link' : 'Bangle.js',
  'default_onp' : "EV_BLUETOOTH",
- 'default_console' : "EV_BLUETOOTH",
+ 'default_console' : "EV_SERIAL1",
  'variables' : 260, # How many variables are allocated for Espruino to use. RAM will be overflowed if this number is too high and code won't compile.
  'bootloader' : 1,
  'binary_name' : 'espruino_%v_banglejs.hex',
