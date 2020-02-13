@@ -1,0 +1,34 @@
+
+SWD Pins: GND, IO, CLK, from bottom up, not sure what fourth one is
+
+Need latest openocd, built with cmsis-dap (and stlink of course)
+
+./configure --enable-stlink --enable-cmsis-dap
+
+Need cmsis-dap flasher board, and the firmware for that:
+
+dd if=lpc11u35_swdap_lpc1768_if_crc.bin of=/media/duncan/CRP\ DISABLD/firmware.bin conv=notrunc
+
+
+Need to unlock the chip:
+
+check value is 0:
+
+./scripts/openocd.sh & ; sleep 3 && echo 'nrf52.dap apreg 1 0x0c' | nc localhost 4444
+
+set to one:
+
+./scripts/openocd.sh & ; sleep 3 && echo 'nrf52.dap apreg 1 0x04 0x01' | nc localhost 4444
+
+check it's 1:
+
+./scripts/openocd.sh & ; sleep 3 && echo 'nrf52.dap apreg 1 0x0c' | nc localhost 4444
+
+
+Set up to flash hex file:
+
+vi scripts/openocd*
+
+./scripts/openocd.sh
+
+
