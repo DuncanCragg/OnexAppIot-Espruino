@@ -16,6 +16,8 @@ info = {
    'makefile' : [
      'DEFINES+=-DCONFIG_GPIO_AS_PINRESET',
      'DEFINES+=-DBLUETOOTH_NAME_PREFIX=\'"Clue"\'',
+     'DFU_PRIVATE_KEY=targets/nrf5x_dfu/dfu_private_key.pem',
+     'DFU_SETTINGS=--application-version 0xff --hw-version 52 --sd-req 0xA9',
      'NRF_SDK15=1'
    ]
  }
@@ -56,6 +58,10 @@ board["_css"] = """
 
 def get_pins():
   pins = [
-   { "name":"PD5", "sortingname":"D05", "port":"D", "num":"17", "functions":{}, "csv":{} },
+   { "name":"PD5", "sortingname":"D05", "port":"D", "num":"34", "functions":{}, "csv":{} }, # P1.02 = 34
   ];
+  pinutils.findpin(pins, "PD5", True)["functions"]["NEGATED"]=0;
+  # everything is non-5v tolerant
+  for pin in pins:
+    pin["functions"]["3.3"]=0;
   return pins
